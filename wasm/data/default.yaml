@@ -15,6 +15,7 @@ switcher:
   save_options:
     - full_shape
     - ascii_punct
+    - zh_simp
   fold_options: true
   abbreviate_options: true
   option_list_separator: '／'

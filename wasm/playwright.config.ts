@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: '.',
+  testDir: 'tests',
   timeout: 60_000,
   retries: 1,
   reporter: 'list',
@@ -10,9 +10,9 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'npx vite --config ../demo/vite.config.ts ../demo',
+    command: 'npm run dev',
     port: 5173,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 30_000,
   },
   projects: [

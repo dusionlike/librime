@@ -84,6 +84,22 @@
       color: #999;
       margin-bottom: 0.5em;
     }
+    #controls {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 0.5em;
+    }
+    #controls button {
+      padding: 4px 14px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.9em;
+      background: #fff;
+      transition: background 0.15s;
+    }
+    #controls button:hover { background: #e8f0fe; }
+    #controls button.active { background: #4a9eff; color: #fff; border-color: #4a9eff; }
   </style>
 </head>
 <body>
@@ -96,6 +112,12 @@
   </div>
 
   <div id="preedit"></div>
+
+  <div id="controls">
+    <button id="toggle-simp" type="button">繁</button>
+    <button id="next-page"   type="button">下一頁</button>
+  </div>
+
   <div class="page-info" id="page-info"></div>
   <ul id="candidates"></ul>
 

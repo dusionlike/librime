@@ -157,4 +157,32 @@ test.describe('Rime WASM Engine', () => {
     // Candidates should disappear
     await expect(page.locator('#candidates li')).toHaveCount(0);
   });
+
+  test('default Traditional mode: qing first candidate is 請', async ({ page }) => {
+    const input = page.locator('#input-box');
+    await input.fill('qing');
+
+    await expect(page.locator('#candidates li').first()).toBeVisible({ timeout: 5000 });
+
+    // Default zh_simp=0 (Traditional), first candidate should be 請
+    const firstText = await page.locator('#candidates li').first().textContent();
+    expect(firstText).toContain('請');
+    expect(firstText).not.toContain('请');
+  });
+
+  test('after zh_simp toggle: qing first candidate is 请', async ({ page }) => {
+    // Click toggle to enable Simplified mode (zh_simp=1)
+    await page.locator('#toggle-simp').click();
+
+    const input = page.locator('#input-box');
+    await input.fill('qing');
+
+    await expect(page.locator('#candidates li').first()).toBeVisible({ timeout: 5000 });
+
+    // With zh_simp enabled (t2s), Traditional 請 → Simplified 请
+    const firstText = await page.locator('#candidates li').first().textContent();
+    expect(firstText).toContain('请');
+    // After toggle, simplified character should be the primary display
+    // The traditional character may appear as reference in brackets
+  });
 });

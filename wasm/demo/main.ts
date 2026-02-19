@@ -2,6 +2,7 @@ import { createRimeEngine, type RimeEngine, type RimeState } from '../src/index'
 
 let engine: RimeEngine;
 let outputText = '';
+let isSimplified = false;
 
 const statusEl = document.getElementById('status')!;
 const inputEl = document.getElementById('input-box') as HTMLInputElement;
@@ -9,6 +10,8 @@ const preeditEl = document.getElementById('preedit')!;
 const pageInfoEl = document.getElementById('page-info')!;
 const candidatesEl = document.getElementById('candidates')!;
 const outputEl = document.getElementById('output')!;
+const toggleSimpEl = document.getElementById('toggle-simp') as HTMLButtonElement;
+const nextPageEl = document.getElementById('next-page') as HTMLButtonElement;
 
 function renderState(state: RimeState) {
   // Handle committed text
@@ -42,9 +45,6 @@ function renderState(state: RimeState) {
     const li = document.createElement('li');
     const label = state.selectLabels[i] ?? String(i + 1);
     let html = `<strong>${label}.</strong> ${escapeHtml(cand.text)}`;
-    if (cand.comment) {
-      html += ` <span class="comment">${escapeHtml(cand.comment)}</span>`;
-    }
     li.innerHTML = html;
     if (i === state.highlightedIndex) li.className = 'active';
     li.addEventListener('click', () => {
@@ -81,6 +81,19 @@ async function main() {
     statusEl.className = 'ready';
     inputEl.disabled = false;
     inputEl.focus();
+
+    // Toggle Traditional/Simplified
+    toggleSimpEl.addEventListener('click', () => {
+      isSimplified = !isSimplified;
+      engine.setOption('zh_simp', isSimplified);
+      toggleSimpEl.classList.toggle('active', isSimplified);
+      toggleSimpEl.textContent = isSimplified ? '简' : '繁';
+    });
+
+    // Next page (forward)
+    nextPageEl.addEventListener('click', () => {
+      renderState(engine.flipPage(true));
+    });
   } catch (e) {
     statusEl.textContent = `Error: ${e}`;
     statusEl.className = 'error';
