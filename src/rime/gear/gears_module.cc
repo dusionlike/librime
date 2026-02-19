@@ -27,7 +27,9 @@
 #include <rime/gear/script_translator.h>
 #include <rime/gear/selector.h>
 #include <rime/gear/shape.h>
+#ifndef RIME_NO_OPENCC
 #include <rime/gear/simplifier.h>
+#endif
 #include <rime/gear/single_char_filter.h>
 #include <rime/gear/speller.h>
 #include <rime/gear/switch_translator.h>
@@ -77,7 +79,9 @@ static void rime_gears_initialize() {
   r.Register("history_translator", new Component<HistoryTranslator>);
 
   // filters
+#ifndef RIME_NO_OPENCC
   r.Register("simplifier", new SimplifierComponent);
+#endif
   r.Register("uniquifier", new Component<Uniquifier>);
   if (!r.Find("charset_filter")) {  // allow improved implementation
     r.Register("charset_filter", new Component<CharsetFilter>);

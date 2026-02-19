@@ -1,0 +1,16 @@
+diff --git a/util/env_posix.cc b/util/env_posix.cc
+index d84cd1e..deadbeef 100644
+--- a/util/env_posix.cc
++++ b/util/env_posix.cc
+@@ -781,6 +781,11 @@ PosixEnv::PosixEnv()
+ void PosixEnv::Schedule(
+     void (*background_work_function)(void* background_work_arg),
+     void* background_work_arg) {
++#ifdef __EMSCRIPTEN__
++  // WASM is single-threaded; execute background work synchronously
++  background_work_function(background_work_arg);
++  return;
++#endif
+   background_work_mutex_.Lock();
+
+   // Start the background thread, if we haven't done so already.

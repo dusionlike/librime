@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rime WASM Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 720px;
+      margin: 2em auto;
+      padding: 0 1em;
+      color: #333;
+    }
+    h1 { margin-bottom: 0.5em; }
+    #status {
+      color: #888;
+      margin-bottom: 1em;
+      font-size: 0.9em;
+    }
+    #status.ready { color: #2a7; }
+    #status.error { color: #c33; }
+    #input-area {
+      position: relative;
+      margin-bottom: 1em;
+    }
+    #input-box {
+      font-size: 1.1em;
+      width: 100%;
+      padding: 10px;
+      border: 2px solid #ccc;
+      border-radius: 6px;
+      outline: none;
+    }
+    #input-box:focus { border-color: #4a9eff; }
+    #input-box:disabled { background: #f5f5f5; }
+    #preedit {
+      font-size: 1.1em;
+      min-height: 1.5em;
+      padding: 6px 0;
+      color: #555;
+    }
+    #preedit .body { color: #4a9eff; text-decoration: underline; }
+    #candidates {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 2em;
+      margin-bottom: 1em;
+    }
+    #candidates li {
+      padding: 6px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1em;
+      transition: background 0.15s;
+    }
+    #candidates li:hover { background: #e8f0fe; }
+    #candidates li.active { background: #4a9eff; color: #fff; border-color: #4a9eff; }
+    #candidates li .comment { color: #999; font-size: 0.85em; margin-left: 4px; }
+    #candidates li.active .comment { color: #dde; }
+    label {
+      display: block;
+      font-size: 0.9em;
+      color: #666;
+      margin-bottom: 4px;
+    }
+    #output {
+      width: 100%;
+      min-height: 120px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 1.1em;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: #fafafa;
+    }
+    .page-info {
+      font-size: 0.85em;
+      color: #999;
+      margin-bottom: 0.5em;
+    }
+  </style>
+</head>
+<body>
+  <h1>Rime WASM Demo</h1>
+  <p id="status">Loading engine...</p>
+
+  <div id="input-area">
+    <input id="input-box" type="text" placeholder="Type pinyin here (e.g. nihao)..."
+           autocomplete="off" spellcheck="false" disabled />
+  </div>
+
+  <div id="preedit"></div>
+  <div class="page-info" id="page-info"></div>
+  <ul id="candidates"></ul>
+
+  <label for="output">Output:</label>
+  <div id="output" data-testid="output"></div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

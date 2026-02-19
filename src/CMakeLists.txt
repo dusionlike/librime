@@ -4,6 +4,9 @@ aux_source_directory(rime/algo rime_algo_src)
 aux_source_directory(rime/config rime_config_src)
 aux_source_directory(rime/dict rime_dict_src)
 aux_source_directory(rime/gear rime_gears_src)
+if(NOT ENABLE_OPENCC)
+  list(FILTER rime_gears_src EXCLUDE REGEX "simplifier\\.cc$")
+endif()
 aux_source_directory(rime/lever rime_levers_src)
 if(rime_plugins_library)
   aux_source_directory(../plugins rime_plugins_src)
@@ -54,8 +57,10 @@ set(rime_dict_deps
     ${Marisa_LIBRARY})
 set(rime_gears_deps
     ${ICONV_LIBRARIES}
-    ${ICU_LIBRARIES}
-    ${Opencc_LIBRARY})
+    ${ICU_LIBRARIES})
+if(ENABLE_OPENCC)
+  list(APPEND rime_gears_deps ${Opencc_LIBRARY})
+endif()
 set(rime_levers_deps "")
 
 if(Glog_FOUND AND WIN32)
