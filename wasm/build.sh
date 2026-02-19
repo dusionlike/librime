@@ -11,13 +11,15 @@ DIST_DIR="$SCRIPT_DIR/dist"
 BOOST_VERSION="1.86.0"
 BOOST_UNDERSCORE="1_86_0"
 BOOST_DIR="$BUILD_DIR/boost_${BOOST_UNDERSCORE}"
-EMSDK_CXXFLAGS="-fexceptions -DBOOST_DISABLE_ASSERTS -DBOOST_DISABLE_CURRENT_LOCATION"
+EMSDK_CXXFLAGS="-flto -fwasm-exceptions -DBOOST_DISABLE_ASSERTS -DBOOST_DISABLE_CURRENT_LOCATION -DBOOST_REGEX_STANDALONE -ffile-prefix-map=$PROJECT_ROOT=."
 
 CMAKE_COMMON=(
   -G Ninja
   -DCMAKE_BUILD_TYPE=Release
   -DBUILD_SHARED_LIBS=OFF
   "-DCMAKE_INSTALL_PREFIX=$SYSROOT"
+  "-DCMAKE_CXX_FLAGS_RELEASE=-Oz -DNDEBUG"
+  "-DCMAKE_C_FLAGS_RELEASE=-Oz -DNDEBUG"
 )
 
 EXPORTED_FUNCTIONS=(
@@ -95,23 +97,8 @@ build_boost() {
     cp -r "$BOOST_DIR/boost" "$SYSROOT/include/"
   fi
 
-  # Build boost_regex with emscripten
-  if [[ ! -f "$SYSROOT/lib/libboost_regex.a" ]]; then
-    log "Building Boost.Regex for WASM..."
-    local obj_dir="$BUILD_DIR/boost_regex_obj"
-    mkdir -p "$obj_dir" "$SYSROOT/lib"
-
-    for src in "$BOOST_DIR"/libs/regex/src/*.cpp; do
-      local name
-      name=$(basename "${src%.cpp}")
-      em++ -c -O2 -std=c++17 $EMSDK_CXXFLAGS \
-        -I"$BOOST_DIR" \
-        "$src" -o "$obj_dir/${name}.o"
-    done
-
-    emar rcs "$SYSROOT/lib/libboost_regex.a" "$obj_dir"/*.o
-    log "Boost.Regex built."
-  fi
+  # Boost.Regex is used header-only via BOOST_REGEX_STANDALONE (delegates to std::regex)
+  # No compiled library needed.
 }
 
 # ─── Phase 3: Build WASM dependencies ──────────────────────────────────────
@@ -221,6 +208,7 @@ build_opencc_wasm() {
     -DENABLE_GTEST=OFF \
     -DBUILD_PYTHON=OFF \
     -DUSE_SYSTEM_MARISA=ON \
+    -DENABLE_DARTS:BOOL=OFF \
     "-DCMAKE_FIND_ROOT_PATH=$SYSROOT" \
     "$src"
   cmake --build . --target libopencc
@@ -244,7 +232,7 @@ build_librime_wasm() {
   mkdir -p "$dst"
 
   cd "$dst"
-  CXXFLAGS="$EMSDK_CXXFLAGS -ffile-prefix-map=$PROJECT_ROOT=." emcmake cmake "${CMAKE_COMMON[@]}" \
+  CXXFLAGS="$EMSDK_CXXFLAGS" emcmake cmake "${CMAKE_COMMON[@]}" \
     -DBUILD_STATIC=ON \
     -DBUILD_TEST=OFF \
     -DENABLE_LOGGING=OFF \
@@ -331,7 +319,7 @@ compile_wasm() {
   local funcs
   funcs=$(join_by , "${EXPORTED_FUNCTIONS[@]}")
 
-  em++ -std=c++17 -O2 \
+  em++ -std=c++17 -Oz -flto \
     $EMSDK_CXXFLAGS \
     -I"$SYSROOT/include" \
     -I"$PROJECT_ROOT/src" \
@@ -343,6 +331,7 @@ compile_wasm() {
     -s MODULARIZE=1 \
     -s EXPORT_ES6=1 \
     -s "EXPORT_NAME=createRimeModule" \
+    -s ELIMINATE_DUPLICATE_FUNCTIONS=1 \
     -s "EXPORTED_FUNCTIONS=[$funcs]" \
     -s 'EXPORTED_RUNTIME_METHODS=["ccall","FS"]' \
     -l idbfs.js \
@@ -352,12 +341,25 @@ compile_wasm() {
     -lyaml-cpp \
     -lleveldb \
     -lmarisa \
-    -lboost_regex \
     -o "$DIST_DIR/rime-api.js" \
     "$SCRIPT_DIR/binding/rime_wasm.cpp"
 
   log "WASM build complete! (all data loaded at runtime)"
-  ls -lh "$DIST_DIR"/rime-api.js "$DIST_DIR"/rime-api.wasm "$DIST_DIR"/rime-api.data "$DIST_DIR"/*.yaml "$DIST_DIR"/*.bin
+
+  # Optional: additional size reduction via binaryen wasm-opt
+  if command -v wasm-opt >/dev/null 2>&1; then
+    log "Running wasm-opt -Oz for additional size reduction..."
+    wasm-opt -Oz \
+      --strip-producers \
+      --enable-bulk-memory \
+      --enable-nontrapping-float-to-int \
+      --enable-exception-handling \
+      "$DIST_DIR/rime-api.wasm" -o "$DIST_DIR/rime-api.wasm" \
+      || log "Warning: wasm-opt failed, keeping em++ output"
+    log "wasm-opt complete."
+  fi
+
+  ls -lh "$DIST_DIR"/rime-api.js "$DIST_DIR"/rime-api.wasm "$DIST_DIR"/rime-api.data "$DIST_DIR"/*.yaml "$DIST_DIR"/*.bin 2>/dev/null || ls -lh "$DIST_DIR"/rime-api.js "$DIST_DIR"/rime-api.wasm "$DIST_DIR"/*.yaml "$DIST_DIR"/*.bin
 }
 
 # ─── Main ──────────────────────────────────────────────────────────────────

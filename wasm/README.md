@@ -2,7 +2,7 @@
 
 [librime](https://github.com/rime/librime) compiled to WebAssembly, packaged as an ESM library.
 
-Includes the **luna_pinyin** (朙月拼音) schema. OpenCC, glog, Lua plugin, and threading are disabled to reduce binary size.
+Includes the **luna_pinyin** (朙月拼音) schema and **OpenCC** for Traditional/Simplified conversion. glog, Lua plugin, and threading are disabled to reduce binary size.
 
 ## Output files
 
@@ -11,15 +11,18 @@ After building, `dist/` contains:
 | File | Size | Description |
 |------|------|-------------|
 | `index.js` | 2.6 KB | TypeScript library entry point |
-| `rime-api.wasm` | 2.0 MB | WASM binary (librime + dependencies) |
-| `rime-api.js` | 93 KB | Emscripten glue code |
+| `rime-api.wasm` | ~1.0 MB | WASM binary (librime + OpenCC + dependencies) |
+| `rime-api.js` | 84 KB | Emscripten glue code |
+| `rime-api.data` | ~1.0 MB | Embedded OpenCC dict data (preloaded by Emscripten) |
 | `default.yaml` | 4 KB | Default engine config (fetched at runtime) |
 | `luna_pinyin.schema.yaml` | 5 KB | Schema definition (fetched at runtime) |
 | `luna_pinyin.table.bin` | 8.3 MB | Dictionary table (fetched at runtime) |
 | `luna_pinyin.prism.bin` | 31 KB | Prism data (fetched at runtime) |
 | `luna_pinyin.reverse.bin` | 131 KB | Reverse lookup data (fetched at runtime) |
 
-**All data files are fetched at runtime** via `fetch()` and written into the Emscripten virtual filesystem before engine initialization. This eliminates the overhead of a `rime-api.data` bundle and allows all files to benefit from HTTP compression (gzip/brotli).
+**Data loading strategy:**
+- **OpenCC dict** (`rime-api.data`): Embedded by Emscripten's `--preload-file`, automatically loaded in the virtual filesystem
+- **Rime config & dictionaries**: Fetched at runtime via `fetch()` and written to the virtual filesystem before engine initialization. This allows all files to benefit from HTTP compression (gzip/brotli)
 
 ## Prerequisites
 
@@ -38,8 +41,10 @@ bash build.sh
 
 # Or run individual phases:
 bash build.sh patches   # Apply LevelDB patches
-bash build.sh boost     # Download and build Boost headers + Boost.Regex
+bash build.sh boost     # Download Boost headers (Boost.Regex used header-only via std::regex)
 bash build.sh deps      # Build yaml-cpp, LevelDB, marisa-trie
+bash build.sh opencc-native  # Build native OpenCC dict tool, generate .ocd2 data
+bash build.sh opencc-wasm    # Build OpenCC for WASM
 bash build.sh rime      # Build librime for WASM
 bash build.sh native    # Build native rime_deployer
 bash build.sh data      # Precompile dictionary data
@@ -132,10 +137,10 @@ Opens a browser page at `http://localhost:5173` with a simple pinyin input demo.
 npx playwright install chromium
 
 # Run E2E tests
-npx playwright test --config tests/playwright.config.ts
+npm test
 ```
 
-10 E2E tests cover: engine initialization, pinyin input, candidate selection (keyboard and mouse), page navigation, escape to clear, and multi-word sequences.
+12 E2E tests cover: engine initialization, pinyin input, candidate selection (keyboard and mouse), page navigation, escape to clear, multi-word sequences, and Traditional/Simplified conversion via OpenCC.
 
 ## Architecture
 
@@ -163,9 +168,22 @@ wasm/
 The build process:
 
 1. **Patches** LevelDB for synchronous scheduling (no background threads in WASM)
-2. **Boost** headers are installed; Boost.Regex is compiled with emscripten
+2. **Boost** headers are installed; Boost.Regex uses `BOOST_REGEX_STANDALONE` to delegate to `std::regex` (no compiled library needed)
 3. **Dependencies** (yaml-cpp, LevelDB, marisa-trie) are cross-compiled to WASM
-4. **librime** is cross-compiled with glog, OpenCC, threading, and Lua disabled
-5. **Native tools** (rime_deployer) are built for the host, used to precompile dictionaries
-6. **Data** is precompiled: `rime_deployer --build` converts YAML + essay.txt into binary .bin files
-7. **WASM binding** links everything into rime-api.wasm; all config YAMLs and dictionary files are copied to dist/ for runtime loading (no preload)
+4. **OpenCC** native dict tool generates `.ocd2` data; OpenCC library is cross-compiled to WASM (DARTS format disabled, only `.ocd2` needed)
+5. **librime** is cross-compiled with OpenCC enabled; glog, threading, and Lua disabled
+6. **Native tools** (rime_deployer) are built for the host, used to precompile dictionaries
+7. **Data** is precompiled: `rime_deployer --build` converts YAML + essay.txt into binary .bin files
+8. **WASM binding** links everything into rime-api.wasm with LTO, `-Oz`, and wasm-native exceptions (`-fwasm-exceptions`); all config YAMLs and dictionary files are copied to dist/ for runtime loading
+
+### Size optimization techniques
+
+The binary is optimized using several techniques that together reduce size from ~2.1MB to ~1.0MB:
+
+- **`BOOST_REGEX_STANDALONE`**: Makes `boost::regex` a header-only wrapper over `std::regex`, eliminating `libboost_regex.a` (~400KB saved)
+- **`-Oz` via `CMAKE_CXX_FLAGS_RELEASE`**: Size-optimized compilation for all WASM libraries and the final link
+- **`-flto`**: Link-Time Optimization for cross-module dead code elimination
+- **`-fwasm-exceptions`**: Native WebAssembly exception handling (smaller than setjmp-based emulation)
+- **`ENABLE_DARTS=OFF`**: Disables legacy `.ocd` format in OpenCC (only `.ocd2` is used)
+- **`wasm-opt -Oz --strip-producers`**: Binaryen post-processing for additional size reduction
+- **`ELIMINATE_DUPLICATE_FUNCTIONS=1`**: Emscripten deduplication pass
