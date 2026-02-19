@@ -11,7 +11,7 @@ DIST_DIR="$SCRIPT_DIR/dist"
 BOOST_VERSION="1.86.0"
 BOOST_UNDERSCORE="1_86_0"
 BOOST_DIR="$BUILD_DIR/boost_${BOOST_UNDERSCORE}"
-EMSDK_CXXFLAGS="-fexceptions"
+EMSDK_CXXFLAGS="-fexceptions -DBOOST_DISABLE_ASSERTS -DBOOST_DISABLE_CURRENT_LOCATION"
 
 CMAKE_COMMON=(
   -G Ninja
@@ -175,7 +175,7 @@ build_librime_wasm() {
   mkdir -p "$dst"
 
   cd "$dst"
-  CXXFLAGS="$EMSDK_CXXFLAGS" emcmake cmake "${CMAKE_COMMON[@]}" \
+  CXXFLAGS="$EMSDK_CXXFLAGS -ffile-prefix-map=$PROJECT_ROOT=." emcmake cmake "${CMAKE_COMMON[@]}" \
     -DBUILD_STATIC=ON \
     -DBUILD_TEST=OFF \
     -DENABLE_LOGGING=OFF \
@@ -231,6 +231,16 @@ precompile_data() {
 
   "$deployer" --build "$data_dir" "$data_dir"
   log "Data precompiled: $(ls "$data_dir/build/" 2>/dev/null || echo 'no build dir')"
+
+  # Strip compile-time-only files (not needed at runtime)
+  log "Stripping compile-time files..."
+  rm -f "$data_dir"/essay.txt
+  rm -f "$data_dir"/*.dict.yaml
+  rm -f "$data_dir"/symbols.yaml
+  rm -f "$data_dir"/user.yaml
+  rm -f "$data_dir"/default.yaml
+  rm -f "$data_dir"/luna_pinyin.schema.yaml
+  log "Runtime data: $(ls "$data_dir/build/")"
 }
 
 # ─── Phase 7: Compile WASM binding ─────────────────────────────────────────
@@ -239,6 +249,14 @@ compile_wasm() {
   log "Compiling WASM binding..."
   local data_dir="$BUILD_DIR/rime_data"
   mkdir -p "$DIST_DIR"
+
+  # Copy all data files (YAML + binary) to dist/ for runtime loading
+  log "Copying data files to dist/ for runtime loading..."
+  cp "$data_dir/build/default.yaml" "$DIST_DIR/"
+  cp "$data_dir/build/luna_pinyin.schema.yaml" "$DIST_DIR/"
+  cp "$data_dir/build/luna_pinyin.table.bin" "$DIST_DIR/"
+  cp "$data_dir/build/luna_pinyin.prism.bin" "$DIST_DIR/"
+  cp "$data_dir/build/luna_pinyin.reverse.bin" "$DIST_DIR/"
 
   local funcs
   funcs=$(join_by , "${EXPORTED_FUNCTIONS[@]}")
@@ -258,7 +276,6 @@ compile_wasm() {
     -s "EXPORTED_FUNCTIONS=[$funcs]" \
     -s 'EXPORTED_RUNTIME_METHODS=["ccall","FS"]' \
     -l idbfs.js \
-    --preload-file "$data_dir@/rime" \
     -Wl,--whole-archive -lrime -Wl,--no-whole-archive \
     -lyaml-cpp \
     -lleveldb \
@@ -267,8 +284,8 @@ compile_wasm() {
     -o "$DIST_DIR/rime-api.js" \
     "$SCRIPT_DIR/binding/rime_wasm.cpp"
 
-  log "WASM build complete!"
-  ls -lh "$DIST_DIR"/rime-api.*
+  log "WASM build complete! (all data loaded at runtime)"
+  ls -lh "$DIST_DIR"/rime-api.js "$DIST_DIR"/rime-api.wasm "$DIST_DIR"/*.yaml "$DIST_DIR"/*.bin
 }
 
 # ─── Main ──────────────────────────────────────────────────────────────────

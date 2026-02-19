@@ -13,6 +13,7 @@ interface EmscriptenModule {
     mkdir(path: string): void;
     mount(type: unknown, opts: Record<string, unknown>, mountpoint: string): void;
     syncfs(populate: boolean, callback: (err: unknown) => void): void;
+    writeFile(path: string, data: Uint8Array): void;
     filesystems: { IDBFS: unknown };
   };
 }
@@ -52,6 +53,36 @@ export async function createRimeEngine(
   }
   Module.FS.mount(Module.FS.filesystems.IDBFS, {}, '/rime_user');
   await syncfs(Module, true);
+
+  // Create /rime/build directory
+  try {
+    Module.FS.mkdir('/rime');
+  } catch {
+    // May already exist
+  }
+  try {
+    Module.FS.mkdir('/rime/build');
+  } catch {
+    // May already exist
+  }
+
+  // Fetch all data files (config YAMLs + binary dictionaries) and write to virtual filesystem
+  const allDataFiles = options.dataFiles ?? [
+    'default.yaml',
+    'luna_pinyin.schema.yaml',
+    'luna_pinyin.table.bin',
+    'luna_pinyin.prism.bin',
+    'luna_pinyin.reverse.bin',
+  ];
+  await Promise.all(
+    allDataFiles.map(async (file) => {
+      const url = `${wasmDir}/${file}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
+      const data = new Uint8Array(await resp.arrayBuffer());
+      Module.FS.writeFile(`/rime/build/${file}`, data);
+    }),
+  );
 
   // Initialize the engine
   const rc = Module.ccall('rime_wasm_init', 'number', [], []) as number;

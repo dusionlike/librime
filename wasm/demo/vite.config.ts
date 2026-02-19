@@ -14,13 +14,15 @@ function serveDistPlugin(): Plugin {
         const filePath = join(distDir, url);
         if (
           existsSync(filePath) &&
-          (url.endsWith('.js') || url.endsWith('.wasm') || url.endsWith('.data'))
+          (url.endsWith('.js') || url.endsWith('.wasm') || url.endsWith('.data') || url.endsWith('.bin') || url.endsWith('.yaml'))
         ) {
           const content = readFileSync(filePath);
           if (url.endsWith('.js'))
             res.setHeader('Content-Type', 'application/javascript');
           else if (url.endsWith('.wasm'))
             res.setHeader('Content-Type', 'application/wasm');
+          else if (url.endsWith('.yaml'))
+            res.setHeader('Content-Type', 'application/yaml');
           else res.setHeader('Content-Type', 'application/octet-stream');
           res.end(content);
           return;

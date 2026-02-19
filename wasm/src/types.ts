@@ -45,8 +45,16 @@ export interface RimeEngine {
 
 export interface RimeWasmOptions {
   /**
-   * URL or path prefix for rime-api.js, rime-api.wasm, and rime-api.data.
+   * URL or path prefix for rime-api.js, rime-api.wasm,
+   * and all data files (YAML configs + binary dictionaries).
    * Defaults to current directory.
    */
   wasmDir?: string;
+  /**
+   * List of data filenames to fetch and load at startup.
+   * Files are fetched from `wasmDir` and written to `/rime/build/` in
+   * the virtual filesystem before engine initialization.
+   * Defaults to luna_pinyin schema and dictionary files plus config YAMLs.
+   */
+  dataFiles?: string[];
 }
