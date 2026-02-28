@@ -330,6 +330,7 @@ compile_wasm() {
     -s STACK_SIZE=8388608 \
     -s MODULARIZE=1 \
     -s EXPORT_ES6=1 \
+    -s ENVIRONMENT=web \
     -s "EXPORT_NAME=createRimeModule" \
     -s ELIMINATE_DUPLICATE_FUNCTIONS=1 \
     -s "EXPORTED_FUNCTIONS=[$funcs]" \
