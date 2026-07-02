@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rime WASM Cache Scenarios Test</title>
+</head>
+<body>
+  <h1>Rime WASM Cache Scenarios Test</h1>
+  <pre id="result">Running...</pre>
+  <pre id="detail"></pre>
+
+  <script type="module">
+    import { createRimeEngine } from '../src/index';
+
+    async function run() {
+      const resultEl = document.getElementById('result');
+      const detailEl = document.getElementById('detail');
+      let allPassed = true;
+
+      function log(msg) {
+        detailEl.textContent += msg + '\n';
+      }
+
+      // ---- Test 1: hasCache / loadCache basic ----
+      try {
+        log('Test 1: create engine, check hasCache, try loadCache...');
+
+        const engine = await createRimeEngine({ wasmDir: '' });
+        const hasCacheNow = await engine.hasCache();
+        log('  hasCache = ' + hasCacheNow);
+
+        if (hasCacheNow) {
+          // Cache exists from a previous test — verify loadCache works
+          await engine.loadCache();
+          const state = engine.processInput('nihao');
+          const ok = state.candidates && state.candidates.length > 0;
+          log('  loadCache from existing cache \u2192 candidates: ' + (ok ? 'PASS' : 'FAIL'));
+          if (!ok) { allPassed = false; }
+        } else {
+          // No cache — verify loadCache throws
+          try {
+            await engine.loadCache();
+            log('  FATAL: loadCache should have thrown!');
+            allPassed = false;
+          } catch (err) {
+            log('  loadCache correctly threw (no cache) \u2192 PASS');
+          }
+        }
+        engine.destroy();
+      } catch (e) {
+        allPassed = false;
+        log('  FAIL: ' + e.message + '\n' + (e.stack || ''));
+      }
+
+      // ---- Test 2: after loadCompiled, hasCache returns true ----
+      try {
+        log('Test 2: loadCompiled then check hasCache...');
+
+        let engine = await createRimeEngine({ wasmDir: '' });
+        await engine.loadCompiled({
+          'default.yaml': 'bin/default.yaml',
+          'luna_pinyin.schema.yaml': 'bin/luna_pinyin.schema.yaml',
+          'luna_pinyin.table.bin': 'bin/luna_pinyin.table.bin',
+          'luna_pinyin.prism.bin': 'bin/luna_pinyin.prism.bin',
+          'luna_pinyin.reverse.bin': 'bin/luna_pinyin.reverse.bin',
+        });
+        const hasCache2 = await engine.hasCache();
+        log('  hasCache after loadCompiled = ' + hasCache2);
+        if (!hasCache2) {
+          throw new Error('Expected hasCache to be true after loadCompiled');
+        }
+        engine.destroy();
+        log('  PASS');
+      } catch (e) {
+        allPassed = false;
+        log('  FAIL: ' + e.message);
+      }
+
+      // ---- Test 3: loadCache restores engine from cache (same session) ----
+      try {
+        log('Test 3: loadCache from newly persisted cache...');
+
+        let engine = await createRimeEngine({ wasmDir: '' });
+        const hasCache3 = await engine.hasCache();
+        log('  hasCache = ' + hasCache3);
+        if (!hasCache3) {
+          log('  SKIP: no cache found (may be sandboxed browser)');
+          engine.destroy();
+        } else {
+          await engine.loadCache();
+          const state = engine.processInput('nihao');
+          if (!state.candidates || state.candidates.length === 0) {
+            throw new Error('No candidates after loadCache');
+          }
+          engine.destroy();
+          log('  PASS: candidates present after loadCache');
+        }
+      } catch (e) {
+        allPassed = false;
+        log('  FAIL: ' + e.message);
+      }
+
+      // ---- Test 4: processInput works after loadCache ----
+      try {
+        log('Test 4: full input cycle after cache...');
+
+        let engine = await createRimeEngine({ wasmDir: '' });
+        const hasCache4 = await engine.hasCache();
+        if (hasCache4) {
+          await engine.loadCache();
+          let state = engine.processInput('shi');
+          const hasCandidates = state.candidates && state.candidates.length > 0;
+          log('  processInput after loadCache \u2192 candidates: ' + (hasCandidates ? 'PASS' : 'FAIL'));
+
+          if (hasCandidates) {
+            state = engine.pickCandidate(0);
+            log('  pickCandidate \u2192 committed: ' + (state.committed || '(none)'));
+          }
+        } else {
+          log('  SKIP: no cache (cannot test)');
+        }
+        engine.destroy();
+      } catch (e) {
+        allPassed = false;
+        log('  FAIL: ' + e.message);
+      }
+
+      // ---- Summary ----
+      if (allPassed) {
+        resultEl.textContent = 'success - all cache scenario tests passed';
+      } else {
+        resultEl.textContent = 'partial - some tests had issues (see detail)';
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>

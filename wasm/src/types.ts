@@ -63,6 +63,10 @@ export interface RimeEngine {
   loadCompiledFromBuffers(buffers: CompiledBuffers): Promise<RimeEngine>;
   /** 从内存缓冲区获取源数据，在 WASM 中编译并初始化引擎。 */
   compileAndLoadFromBuffers(buffers: SourceBuffers): Promise<RimeEngine>;
+  /** 检查是否存在缓存的预编译数据（/rime/build 中是否有已持久化的词库文件）。 */
+  hasCache(): Promise<boolean>;
+  /** 从 IndexedDB 缓存加载预编译数据并初始化引擎，无需重新下载或编译。 */
+  loadCache(): Promise<RimeEngine>;
   /** 发送按键序列（如 "nihao"）并获取更新后的状态。 */
   processInput(keys: string): RimeState;
   /** 在当前页按索引选择候选词。 */

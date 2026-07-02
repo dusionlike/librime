@@ -192,4 +192,27 @@ test.describe('Rime WASM Engine', () => {
     const resultText = await page.locator('#result').textContent();
     expect(resultText).toContain('success');
   });
+
+  test.describe('Cache persistence', () => {
+    test('cache-test.html: loadCache works after loadCompiled', async ({ page }) => {
+      await page.goto('/cache-test.html');
+
+      // Wait for the result to show success
+      await expect(page.locator('#result')).toContainText('success', { timeout: 300000 });
+
+      const resultText = await page.locator('#result').textContent();
+      expect(resultText).toContain('success');
+    });
+
+    test('cache-scenarios: comprehensive cache edge cases', async ({ page }) => {
+      await page.goto('/cache-scenarios.html');
+
+      // Wait for result
+      await expect(page.locator('#result')).toContainText('success', { timeout: 300000 });
+
+      const resultText = await page.locator('#result').textContent();
+      // "success" means at least the core tests (1-3) passed
+      expect(resultText).toContain('success');
+    });
+  });
 });

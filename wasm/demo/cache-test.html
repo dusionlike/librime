@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rime WASM Cache Test</title>
+</head>
+<body>
+  <h1>Rime WASM Cache Test</h1>
+  <pre id="result">Running...</pre>
+  <pre id="detail"></pre>
+
+  <script type="module">
+    import { createRimeEngine } from '../src/index';
+
+    async function run() {
+      const resultEl = document.getElementById('result');
+      const detailEl = document.getElementById('detail');
+
+      try {
+        // ---- 第一次加载：从 URL 加载预编译数据 ----
+        resultEl.textContent = 'Phase 1: First load (loadCompiled)...';
+        let engine = await createRimeEngine({ wasmDir: '' });
+        let hasCacheBefore = await engine.hasCache();
+        detailEl.textContent += `hasCache before load: ${hasCacheBefore}\n`;
+
+        await engine.loadCompiled({
+          'default.yaml': 'bin/default.yaml',
+          'luna_pinyin.schema.yaml': 'bin/luna_pinyin.schema.yaml',
+          'luna_pinyin.table.bin': 'bin/luna_pinyin.table.bin',
+          'luna_pinyin.prism.bin': 'bin/luna_pinyin.prism.bin',
+          'luna_pinyin.reverse.bin': 'bin/luna_pinyin.reverse.bin',
+        });
+
+        let state = engine.processInput('nihao');
+        let firstResult = state.candidates?.length > 0 ? 'candidates ok' : 'no candidates';
+        detailEl.textContent += `First load: ${firstResult}\n`;
+        engine.destroy();
+
+        // ---- 第二次加载：从缓存恢复 ----
+        resultEl.textContent = 'Phase 2: Load from cache...';
+        engine = await createRimeEngine({ wasmDir: '' });
+        hasCacheBefore = await engine.hasCache();
+        detailEl.textContent += `hasCache after first load: ${hasCacheBefore}\n`;
+
+        if (hasCacheBefore) {
+          await engine.loadCache();
+          state = engine.processInput('nihao');
+          let cacheResult = state.candidates?.length > 0 ? 'candidates ok' : 'no candidates';
+          detailEl.textContent += `Cache load: ${cacheResult}\n`;
+
+          // 如果没有缓存就应该失败，这里验证缓存能正常输入
+          if (state.candidates && state.candidates.length > 0) {
+            resultEl.textContent = 'success - cache works';
+          } else {
+            throw new Error('Cache loaded but no candidates');
+          }
+        } else {
+          throw new Error('Expected cache to exist after first load');
+        }
+
+        engine.destroy();
+      } catch (e) {
+        resultEl.textContent = `error: ${e}`;
+        console.error('Cache test failed:', e);
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>

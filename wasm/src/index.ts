@@ -16,6 +16,7 @@ interface EmscriptenModule {
     writeFile(path: string, data: Uint8Array): void;
     readFile(path: string, opts?: { encoding?: string; flags?: string }): Uint8Array;
     filesystems: { IDBFS: unknown };
+    unlink(path: string): void;
   };
 }
 
@@ -58,9 +59,22 @@ function writeBuffers(
 }
 
 /**
+ * 检查 /rime/build 目录中是否存在缓存数据（通过检查 default.yaml 是否存在）。
+ */
+function checkBuildCache(module: EmscriptenModule): boolean {
+  try {
+    module.FS.readFile('/rime/build/default.yaml');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 创建 Rime 输入法引擎实例。
  * 此方法只加载 WASM 模块，不加载词库数据。
  * 加载词库需要调用 loadCompiled / compileAndLoad 或对应的 FromBuffers 方法。
+ * 如果已有缓存，也可以调用 loadCache 直接从 IndexedDB 恢复。
  */
 export async function createRimeEngine(
   options: RimeWasmOptions = {},
@@ -73,7 +87,10 @@ export async function createRimeEngine(
   try { Module.FS.mkdir('/rime/build'); } catch { /* 已存在 */ }
   try { Module.FS.mkdir('/rime_user'); } catch { /* 已存在 */ }
 
+  // 将 /rime/build 和 /rime_user 都挂载到 IDBFS 实现持久化
+  Module.FS.mount(Module.FS.filesystems.IDBFS, {}, '/rime/build');
   Module.FS.mount(Module.FS.filesystems.IDBFS, {}, '/rime_user');
+  // populate=true 从 IndexedDB 读取数据到内存文件系统
   await syncfs(Module, true);
 
   let loaded = false;
@@ -85,6 +102,7 @@ export async function createRimeEngine(
       throw new Error(`rime_wasm_init 失败，返回码: ${rc}`);
     }
     loaded = true;
+    // 将 /rime/build 和 /rime_user 的变更写回 IndexedDB
     await syncfs(Module, false);
   }
 
@@ -135,6 +153,22 @@ export async function createRimeEngine(
       const rc = Module.ccall('rime_wasm_precompile', 'number', [], []) as number;
       if (rc !== 0) {
         throw new Error(`rime_wasm_precompile 失败，返回码: ${rc}`);
+      }
+      await initEngine();
+      return engine;
+    },
+
+    async hasCache(): Promise<boolean> {
+      if (destroyed) throw new Error('引擎已被销毁');
+      // 重新从 IndexedDB 同步，确保拿到最新状态
+      await syncfs(Module, true);
+      return checkBuildCache(Module);
+    },
+
+    async loadCache(): Promise<RimeEngine> {
+      if (loaded) throw new Error('引擎已初始化，请勿重复调用');
+      if (!checkBuildCache(Module)) {
+        throw new Error('缓存中无预编译数据，请先调用 loadCompiled / compileAndLoad');
       }
       await initEngine();
       return engine;
