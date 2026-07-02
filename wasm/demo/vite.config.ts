@@ -11,10 +11,12 @@ function serveDistPlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         if (!req.url) return next();
         const url = req.url.split('?')[0];
-        const filePath = join(distDir, url);
+        // Strip leading slash so join works correctly with subdirectory paths
+        const relPath = url.startsWith('/') ? url.slice(1) : url;
+        const filePath = join(distDir, relPath);
         if (
           existsSync(filePath) &&
-          (url.endsWith('.js') || url.endsWith('.wasm') || url.endsWith('.data') || url.endsWith('.bin') || url.endsWith('.yaml'))
+          (url.endsWith('.js') || url.endsWith('.wasm') || url.endsWith('.data') || url.endsWith('.bin') || url.endsWith('.yaml') || url.endsWith('.txt'))
         ) {
           const content = readFileSync(filePath);
           if (url.endsWith('.js'))

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rime WASM Precompile Test</title>
+</head>
+<body>
+  <h1>Rime WASM Precompile Test</h1>
+  <pre id="result">Running...</pre>
+  <pre id="files"></pre>
+
+  <script type="module">
+    import { createRimeEngine } from '../src/index';
+
+    async function run() {
+      const resultEl = document.getElementById('result');
+
+      try {
+        // 测试方式一：从 URL 加载预编译数据（dist/bin/）
+        resultEl.textContent = 'Testing loadCompiled...';
+
+        let engine = await createRimeEngine({ wasmDir: '' });
+        await engine.loadCompiled({
+          'default.yaml': 'bin/default.yaml',
+          'luna_pinyin.schema.yaml': 'bin/luna_pinyin.schema.yaml',
+          'luna_pinyin.table.bin': 'bin/luna_pinyin.table.bin',
+          'luna_pinyin.prism.bin': 'bin/luna_pinyin.prism.bin',
+          'luna_pinyin.reverse.bin': 'bin/luna_pinyin.reverse.bin',
+        });
+
+        const version = engine.getVersion();
+        let state = engine.processInput('nihao');
+        if (!state.candidates || state.candidates.length === 0) {
+          throw new Error('loadCompiled 无候选词');
+        }
+        engine.destroy();
+
+        // 测试方式二：从 URL 编译源数据（dist/source/）
+        resultEl.textContent = 'Testing compileAndLoad...';
+
+        engine = await createRimeEngine({ wasmDir: '' });
+        await engine.compileAndLoad({
+          'default.yaml': 'source/default.yaml',
+          'luna_pinyin.schema.yaml': 'source/luna_pinyin.schema.yaml',
+          'luna_pinyin.dict.yaml': 'source/luna_pinyin.dict.yaml',
+          'symbols.yaml': 'source/symbols.yaml',
+          'essay.txt': 'source/essay.txt',
+        });
+
+        state = engine.processInput('nihao');
+        if (!state.candidates || state.candidates.length === 0) {
+          throw new Error('compileAndLoad 无候选词');
+        }
+        engine.destroy();
+
+        // 测试方式三：通过 Buffers 加载预编译数据
+        resultEl.textContent = 'Testing loadCompiledFromBuffers...';
+
+        const compiledBuffers = {
+          'default.yaml': new Uint8Array(await (await fetch('bin/default.yaml')).arrayBuffer()),
+          'luna_pinyin.schema.yaml': new Uint8Array(await (await fetch('bin/luna_pinyin.schema.yaml')).arrayBuffer()),
+          'luna_pinyin.table.bin': new Uint8Array(await (await fetch('bin/luna_pinyin.table.bin')).arrayBuffer()),
+          'luna_pinyin.prism.bin': new Uint8Array(await (await fetch('bin/luna_pinyin.prism.bin')).arrayBuffer()),
+          'luna_pinyin.reverse.bin': new Uint8Array(await (await fetch('bin/luna_pinyin.reverse.bin')).arrayBuffer()),
+        };
+
+        engine = await createRimeEngine({ wasmDir: '' });
+        await engine.loadCompiledFromBuffers(compiledBuffers);
+
+        state = engine.processInput('nihao');
+        if (!state.candidates || state.candidates.length === 0) {
+          throw new Error('loadCompiledFromBuffers 无候选词');
+        }
+
+        engine.destroy();
+        resultEl.textContent = `success - version: ${version} （三种方式均通过）`;
+      } catch (e) {
+        resultEl.textContent = `error: ${e}`;
+        console.error('测试失败:', e);
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>

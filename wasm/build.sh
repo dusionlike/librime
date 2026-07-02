@@ -31,6 +31,9 @@ EXPORTED_FUNCTIONS=(
   _rime_wasm_set_option
   _rime_wasm_get_version
   _rime_wasm_destroy
+  _rime_wasm_precompile
+  _rime_wasm_read_file
+  _rime_wasm_free
   _malloc
   _free
 )
@@ -248,73 +251,127 @@ build_librime_wasm() {
   cd "$SCRIPT_DIR"
 }
 
-# ─── Phase 5: Build native rime tools ──────────────────────────────────────
+# ─── Phase 5: Prepare source data for WASM preloading ───────────────────
 
-build_native_tools() {
-  log "Building native rime tools..."
-  rm -rf "$NATIVE_DIR"
-  mkdir -p "$NATIVE_DIR"
-
-  cd "$NATIVE_DIR"
-  cmake -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_SHARED_LIBS=ON \
-    -DBUILD_TEST=OFF \
-    -DENABLE_LOGGING=OFF \
-    -DENABLE_OPENCC=OFF \
-    "$PROJECT_ROOT"
-  cmake --build . --target rime_deployer
-  cd "$SCRIPT_DIR"
-}
-
-# ─── Phase 6: Precompile dictionary data ───────────────────────────────────
-
-precompile_data() {
-  log "Precompiling rime data..."
-  local data_dir="$BUILD_DIR/rime_data"
+prepare_source_data() {
+  log "Preparing source data for WASM..."
+  local data_dir="$BUILD_DIR/rime_source_data"
   rm -rf "$data_dir"
   mkdir -p "$data_dir"
 
-  # Copy modified data files
+  # Copy source data files (YAML configs + dict + essay)
   cp "$SCRIPT_DIR"/data/*.yaml "$data_dir/"
   cp "$SCRIPT_DIR"/data/essay.txt "$data_dir/"
+  log "Source data ready: $(ls "$data_dir")"
+}
 
-  # Run native rime_deployer to build binary schemas
-  local deployer="$NATIVE_DIR/bin/rime_deployer"
-  if [[ ! -x "$deployer" ]]; then
-    log "ERROR: rime_deployer not found at $deployer"
-    exit 1
+# ─── Phase 6: Build native tools (rime_deployer etc.) ──────────────────────
+
+build_native_tools() {
+  log "Building native librime tools..."
+  local dst="$BUILD_DIR/native"
+  rm -rf "$dst"
+  mkdir -p "$dst"
+
+  cd "$dst"
+  cmake -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TEST=OFF \
+    -DBUILD_SHARED_LIBS=ON \
+    -DENABLE_LOGGING=OFF \
+    -DENABLE_OPENCC=ON \
+    -DENABLE_EXTERNAL_PLUGINS=OFF \
+    "$PROJECT_ROOT"
+  cmake --build .
+  cd "$SCRIPT_DIR"
+
+  # Verify rime_deployer was built
+  if [[ ! -f "$dst/bin/rime_deployer" ]]; then
+    # Maybe it's in tools/
+    if [[ -f "$dst/tools/rime_deployer" ]]; then
+      mkdir -p "$dst/bin"
+      cp "$dst/tools/rime_deployer" "$dst/bin/"
+    else
+      log "Warning: rime_deployer not found, checking build output..."
+      find "$dst" -name rime_deployer -type f 2>/dev/null
+    fi
+  fi
+  log "Native tools built: $(ls "$dst/bin/" 2>/dev/null)"
+}
+
+# ─── Phase 6b: Precompile data with native deployer ─────────────────────────
+
+precompile_data() {
+  log "Precompiling data with native rime_deployer..."
+  local native_bin="$BUILD_DIR/native/bin"
+  local rime_data_dir="$BUILD_DIR/rime_data"
+  rm -rf "$rime_data_dir"
+  mkdir -p "$rime_data_dir"
+
+  # Copy source data to working dir for deployer
+  cp "$SCRIPT_DIR"/data/*.yaml "$rime_data_dir/"
+  cp "$SCRIPT_DIR"/data/essay.txt "$rime_data_dir/"
+
+  if [[ ! -f "$native_bin/rime_deployer" ]]; then
+    log "Error: rime_deployer not found. Run 'build_native_tools' first."
+    return 1
   fi
 
-  "$deployer" --build "$data_dir" "$data_dir"
-  log "Data precompiled: $(ls "$data_dir/build/" 2>/dev/null || echo 'no build dir')"
+  # Run deployer (LD_LIBRARY_PATH to find librime.so)
+  LD_LIBRARY_PATH="$BUILD_DIR/native/lib" \
+    "$native_bin/rime_deployer" --build "$rime_data_dir"
 
-  # Strip compile-time-only files (not needed at runtime)
-  log "Stripping compile-time files..."
-  rm -f "$data_dir"/essay.txt
-  rm -f "$data_dir"/*.dict.yaml
-  rm -f "$data_dir"/symbols.yaml
-  rm -f "$data_dir"/user.yaml
-  rm -f "$data_dir"/default.yaml
-  rm -f "$data_dir"/luna_pinyin.schema.yaml
-  log "Runtime data: $(ls "$data_dir/build/")"
+  # Verify output
+  local build_dir="$rime_data_dir/build"
+  if [[ -d "$build_dir" ]]; then
+    log "Precompiled data: $(ls "$build_dir")"
+  else
+    log "Warning: no build/ directory created; checking rime_data_dir..."
+    ls -la "$rime_data_dir" 2>/dev/null
+  fi
+}
+
+# ─── Phase 6c: Prepare distribution directories ─────────────────────────────
+
+prepare_dist() {
+  log "Preparing distribution..."
+
+  # Compiled data → dist/bin/
+  local compiled_dir="$DIST_DIR/bin"
+  rm -rf "$compiled_dir"
+  mkdir -p "$compiled_dir"
+
+  # Source data → dist/source/
+  local source_dir="$DIST_DIR/source"
+  rm -rf "$source_dir"
+  mkdir -p "$source_dir"
+
+  # Copy compiled binary files from native deployer output
+  local rime_data_build="$BUILD_DIR/rime_data/build"
+  if [[ -d "$rime_data_build" ]]; then
+    cp "$rime_data_build"/*.bin "$compiled_dir/" 2>/dev/null || true
+    cp "$rime_data_build"/*.yaml "$compiled_dir/" 2>/dev/null || true
+    log "Copied compiled data from $rime_data_build"
+  else
+    log "Warning: no precompiled data found at $rime_data_build"
+  fi
+
+  # Copy source data
+  cp "$SCRIPT_DIR"/data/*.yaml "$source_dir/"
+  cp "$SCRIPT_DIR"/data/essay.txt "$source_dir/"
+  log "Copied source data to $source_dir"
+
+  log "dist/bin/:  $(ls "$compiled_dir" 2>/dev/null)"
+  log "dist/source/: $(ls "$source_dir" 2>/dev/null)"
 }
 
 # ─── Phase 7: Compile WASM binding ─────────────────────────────────────────
 
 compile_wasm() {
   log "Compiling WASM binding..."
-  local data_dir="$BUILD_DIR/rime_data"
+  local source_data_dir="$BUILD_DIR/rime_source_data"
   local opencc_data_dir="$BUILD_DIR/opencc_data"
   mkdir -p "$DIST_DIR"
-
-  # Copy all data files (YAML + binary) to dist/ for runtime loading
-  log "Copying data files to dist/ for runtime loading..."
-  cp "$data_dir/build/default.yaml" "$DIST_DIR/"
-  cp "$data_dir/build/luna_pinyin.schema.yaml" "$DIST_DIR/"
-  cp "$data_dir/build/luna_pinyin.table.bin" "$DIST_DIR/"
-  cp "$data_dir/build/luna_pinyin.prism.bin" "$DIST_DIR/"
-  cp "$data_dir/build/luna_pinyin.reverse.bin" "$DIST_DIR/"
 
   local funcs
   funcs=$(join_by , "${EXPORTED_FUNCTIONS[@]}")
@@ -334,7 +391,7 @@ compile_wasm() {
     -s "EXPORT_NAME=createRimeModule" \
     -s ELIMINATE_DUPLICATE_FUNCTIONS=1 \
     -s "EXPORTED_FUNCTIONS=[$funcs]" \
-    -s 'EXPORTED_RUNTIME_METHODS=["ccall","FS"]' \
+    -s 'EXPORTED_RUNTIME_METHODS=["ccall","FS","getValue","setValue"]' \
     -l idbfs.js \
     --preload-file "$opencc_data_dir@/rime/opencc" \
     -Wl,--whole-archive -lrime -Wl,--no-whole-archive \
@@ -345,7 +402,7 @@ compile_wasm() {
     -o "$DIST_DIR/rime-api.js" \
     "$SCRIPT_DIR/binding/rime_wasm.cpp"
 
-  log "WASM build complete! (all data loaded at runtime)"
+  log "WASM build complete! (all data preloaded)"
 
   # Optional: additional size reduction via binaryen wasm-opt
   if command -v wasm-opt >/dev/null 2>&1; then
@@ -360,7 +417,7 @@ compile_wasm() {
     log "wasm-opt complete."
   fi
 
-  ls -lh "$DIST_DIR"/rime-api.js "$DIST_DIR"/rime-api.wasm "$DIST_DIR"/rime-api.data "$DIST_DIR"/*.yaml "$DIST_DIR"/*.bin 2>/dev/null || ls -lh "$DIST_DIR"/rime-api.js "$DIST_DIR"/rime-api.wasm "$DIST_DIR"/*.yaml "$DIST_DIR"/*.bin
+  ls -lh "$DIST_DIR"/rime-api.js "$DIST_DIR"/rime-api.wasm "$DIST_DIR"/rime-api.data 2>/dev/null
 }
 
 # ─── Main ──────────────────────────────────────────────────────────────────
@@ -382,8 +439,9 @@ main() {
     opencc-native) build_opencc_native ;;
     opencc-wasm)   build_opencc_wasm ;;
     rime)          build_librime_wasm ;;
-    native)        build_native_tools ;;
-    data)          precompile_data ;;
+    source-data)   prepare_source_data ;;
+    native-tools)  build_native_tools ;;
+    precompile)    build_native_tools; precompile_data; prepare_dist ;;
     wasm)          compile_wasm ;;
     all)
       apply_patches
@@ -394,12 +452,19 @@ main() {
       build_opencc_native
       build_opencc_wasm
       build_librime_wasm
+      prepare_source_data
+      compile_wasm
       build_native_tools
       precompile_data
-      compile_wasm
+      prepare_dist
+      ;;
+    dist)
+      build_native_tools
+      precompile_data
+      prepare_dist
       ;;
     *)
-      echo "Usage: $0 [patches|boost|deps|opencc-native|opencc-wasm|rime|native|data|wasm|all]"
+      echo "Usage: $0 [patches|boost|deps|opencc-native|opencc-wasm|rime|source-data|native-tools|precompile|wasm|dist|all]"
       exit 1
       ;;
   esac

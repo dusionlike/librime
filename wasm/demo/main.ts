@@ -71,8 +71,19 @@ async function main() {
   const t0 = performance.now();
 
   try {
-    engine = await createRimeEngine({
-      wasmDir: '',
+    statusEl.textContent = 'Loading Rime WASM...';
+
+    // 第一步：加载 WASM 模块
+    engine = await createRimeEngine({ wasmDir: '' });
+
+    // 第二步：加载预编译好的数据（从 dist/bin/）
+    statusEl.textContent = 'Loading pre-compiled data...';
+    await engine.loadCompiled({
+      'default.yaml': 'bin/default.yaml',
+      'luna_pinyin.schema.yaml': 'bin/luna_pinyin.schema.yaml',
+      'luna_pinyin.table.bin': 'bin/luna_pinyin.table.bin',
+      'luna_pinyin.prism.bin': 'bin/luna_pinyin.prism.bin',
+      'luna_pinyin.reverse.bin': 'bin/luna_pinyin.reverse.bin',
     });
 
     const elapsed = Math.round(performance.now() - t0);

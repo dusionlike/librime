@@ -121,9 +121,6 @@ int rime_wasm_init() {
   api->setup(&traits);
   api->initialize(&traits);
 
-  // Deploy schemas (synchronous in WASM)
-  api->start_maintenance(true);
-
   // Create session
   session = api->create_session();
   if (!session) return -2;
@@ -193,6 +190,85 @@ void rime_wasm_destroy() {
   }
   api->finalize();
   engine_started = false;
+}
+
+// ─── Precompile: compile source data into binary files only ──────────────
+// Sets up deployer, runs deployment, finalizes cleanly.
+// After this, compiled .table.bin, .prism.bin, .reverse.bin exist in /rime/build/.
+// NO session or engine state is left behind.
+EMSCRIPTEN_KEEPALIVE
+int rime_wasm_precompile() {
+  using namespace rime_wasm;
+
+  // Clean up any existing engine state first
+  if (engine_started) {
+    if (session) {
+      api->destroy_session(session);
+      session = 0;
+    }
+    api->finalize();
+    engine_started = false;
+  }
+
+  api = rime_get_api();
+  if (!api) return -1;
+
+  RIME_STRUCT(RimeTraits, traits);
+  traits.shared_data_dir = "/rime";
+  traits.user_data_dir = "/rime";  // same dir: compiled output → /rime/build/
+  traits.app_name = "rime-wasm";
+  traits.distribution_name = "Rime WASM";
+  traits.distribution_code_name = "rime-wasm";
+  traits.distribution_version = "1.16.1";
+
+  api->setup(&traits);
+  api->initialize(&traits);
+
+  Bool ok = api->start_maintenance(True);
+  if (!ok) {
+    api->finalize();
+    return -2;
+  }
+
+  api->finalize();
+  return 0;
+}
+
+// ─── Read a compiled file from /rime/build/ into a JS buffer ───────────
+// Returns a pointer to a buffer (caller must free via rime_wasm_free).
+// Output: *out_size = size in bytes, returns pointer or NULL on error.
+EMSCRIPTEN_KEEPALIVE
+void* rime_wasm_read_file(const char* filename, int* out_size) {
+  if (!filename || !out_size) return nullptr;
+  // Use emscripten's FS to read file
+  FILE* f = fopen(filename, "rb");
+  if (!f) {
+    *out_size = -1;
+    return nullptr;
+  }
+  fseek(f, 0, SEEK_END);
+  long size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  void* buf = malloc(size);
+  if (!buf) {
+    fclose(f);
+    *out_size = -2;
+    return nullptr;
+  }
+  size_t nread = fread(buf, 1, size, f);
+  fclose(f);
+  if ((long)nread != size) {
+    free(buf);
+    *out_size = -3;
+    return nullptr;
+  }
+  *out_size = (int)size;
+  return buf;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void rime_wasm_free(void* ptr) {
+  free(ptr);
 }
 
 }  // extern "C"
