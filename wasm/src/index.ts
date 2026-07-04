@@ -179,7 +179,7 @@ export async function createRimeEngine(
     // 缓存未命中，下载默认源词库并编译
     const buffers: Record<string, Uint8Array> = {};
     for (const file of DEFAULT_SOURCE_FILES) {
-      buffers[file] = await fetchBuffer(`source/${file}`);
+      buffers[file] = await fetchBuffer(`${wasmDir}/source/${file}`)
     }
     writeBuffers(Module, buffers, '/rime');
     const rc = Module.ccall('rime_wasm_precompile', 'number', [], []) as number;

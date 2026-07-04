@@ -3,12 +3,12 @@
 
 schema:
   schema_id: luna_pinyin
-  name: 朙月拼音
+  name: 明月拼音
   version: "0.15.wasm"
   author:
     - 佛振 <chen.sst@gmail.com>
   description: |
-    Rime 預設的拼音輸入方案。
+    基于 Rime 预设拼音输入方案的简化字版本。
 
 switches:
   - name: ascii_mode
@@ -18,9 +18,6 @@ switches:
     states: [ 半寬文字, 全寬文字 ]
   - name: ascii_punct
     states: [ 中文標點, 西文標點 ]
-  - name: zh_simp
-    reset: 0
-    states: [ 繁體, 簡體 ]
 
 engine:
   processors:
@@ -42,7 +39,6 @@ engine:
     - punct_translator
     - script_translator
   filters:
-    - simplifier@zh_simp
     - uniquifier
 
 speller:
@@ -76,8 +72,3 @@ key_binder:
 
 recognizer:
   import_preset: default
-
-zh_simp:
-  option_name: zh_simp
-  opencc_config: t2s.json
-  tips: all

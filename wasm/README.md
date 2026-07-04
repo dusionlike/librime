@@ -2,7 +2,7 @@
 
 [librime](https://github.com/rime/librime) compiled to WebAssembly, packaged as an ESM library.
 
-Includes the **luna_pinyin** (朙月拼音) schema and **OpenCC** for Traditional/Simplified conversion. glog, Lua plugin, and threading are disabled to reduce binary size.
+Includes the **luna_pinyin** (朙月拼音) schema. glog, Lua plugin, OpenCC, and threading are disabled to reduce binary size.
 
 ## Output files
 
@@ -11,9 +11,8 @@ After building, `dist/` contains:
 | File | Size | Description |
 |------|------|-------------|
 | `index.js` | 2.6 KB | TypeScript library entry point |
-| `rime-api.wasm` | ~1.0 MB | WASM binary (librime + OpenCC + dependencies) |
+| `rime-api.wasm` | ~1.0 MB | WASM binary (librime + dependencies) |
 | `rime-api.js` | 84 KB | Emscripten glue code |
-| `rime-api.data` | ~1.0 MB | Embedded OpenCC dict data (preloaded by Emscripten) |
 | `default.yaml` | 4 KB | Default engine config (fetched at runtime) |
 | `luna_pinyin.schema.yaml` | 5 KB | Schema definition (fetched at runtime) |
 | `luna_pinyin.table.bin` | 8.3 MB | Dictionary table (fetched at runtime) |
@@ -21,7 +20,6 @@ After building, `dist/` contains:
 | `luna_pinyin.reverse.bin` | 131 KB | Reverse lookup data (fetched at runtime) |
 
 **Data loading strategy:**
-- **OpenCC dict** (`rime-api.data`): Embedded by Emscripten's `--preload-file`, automatically loaded in the virtual filesystem
 - **Rime config & dictionaries**: Fetched at runtime via `fetch()` and written to the virtual filesystem before engine initialization. This allows all files to benefit from HTTP compression (gzip/brotli)
 
 ## Prerequisites
@@ -43,8 +41,6 @@ bash build.sh
 bash build.sh patches   # Apply LevelDB patches
 bash build.sh boost     # Download Boost headers (Boost.Regex used header-only via std::regex)
 bash build.sh deps      # Build yaml-cpp, LevelDB, marisa-trie
-bash build.sh opencc-native  # Build native OpenCC dict tool, generate .ocd2 data
-bash build.sh opencc-wasm    # Build OpenCC for WASM
 bash build.sh rime      # Build librime for WASM
 bash build.sh native    # Build native rime_deployer
 bash build.sh data      # Precompile dictionary data

@@ -16,7 +16,7 @@ function serveDistPlugin(): Plugin {
         const filePath = join(distDir, relPath);
         if (
           existsSync(filePath) &&
-          (url.endsWith('.js') || url.endsWith('.wasm') || url.endsWith('.data') || url.endsWith('.bin') || url.endsWith('.yaml') || url.endsWith('.txt'))
+          (url.endsWith('.js') || url.endsWith('.wasm') || url.endsWith('.bin') || url.endsWith('.yaml') || url.endsWith('.txt'))
         ) {
           const content = readFileSync(filePath);
           if (url.endsWith('.js'))

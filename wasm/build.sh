@@ -158,78 +158,6 @@ build_marisa() {
   cd "$SCRIPT_DIR"
 }
 
-# ─── Phase 3b: Build OpenCC native tool and generate dict data ───────────────
-
-build_opencc_native() {
-  log "Building OpenCC native dict tool..."
-  local src="$PROJECT_ROOT/deps/opencc"
-  local dst="$BUILD_DIR/opencc_native"
-  rm -rf "$dst"
-  mkdir -p "$dst"
-
-  cd "$dst"
-  cmake -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DENABLE_GTEST=OFF \
-    -DBUILD_PYTHON=OFF \
-    -DUSE_SYSTEM_MARISA=OFF \
-    "$src"
-  cmake --build . --target opencc_dict
-  cd "$SCRIPT_DIR"
-
-  local dict_tool="$dst/src/tools/opencc_dict"
-  local dict_dir="$src/data/dictionary"
-  local out_dir="$BUILD_DIR/opencc_data"
-  rm -rf "$out_dir"
-  mkdir -p "$out_dir"
-
-  for name in TSCharacters TSPhrases STCharacters STPhrases; do
-    log "Generating ${name}.ocd2..."
-    "$dict_tool" \
-      --input  "$dict_dir/${name}.txt" \
-      --output "$out_dir/${name}.ocd2" \
-      --from text \
-      --to ocd2
-  done
-
-  cp "$src/data/config/t2s.json" "$out_dir/"
-  cp "$src/data/config/s2t.json" "$out_dir/"
-  log "OpenCC data ready: $(ls "$out_dir")"
-}
-
-# ─── Phase 3c: Build OpenCC for WASM ─────────────────────────────────────────
-
-build_opencc_wasm() {
-  log "Building OpenCC for WASM..."
-  local src="$PROJECT_ROOT/deps/opencc"
-  local dst="$BUILD_DIR/opencc_wasm"
-  rm -rf "$dst"
-  mkdir -p "$dst"
-
-  cd "$dst"
-  CXXFLAGS="$EMSDK_CXXFLAGS -I$SYSROOT/include" emcmake cmake "${CMAKE_COMMON[@]}" \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DENABLE_GTEST=OFF \
-    -DBUILD_PYTHON=OFF \
-    -DUSE_SYSTEM_MARISA=ON \
-    -DENABLE_DARTS:BOOL=OFF \
-    "-DCMAKE_FIND_ROOT_PATH=$SYSROOT" \
-    "$src"
-  cmake --build . --target libopencc
-  cd "$SCRIPT_DIR"
-
-  # Manual install to avoid cmake --install trying to install WASM executables
-  local opencc_inc="$SYSROOT/include/opencc"
-  mkdir -p "$opencc_inc"
-  for f in "$src/src/"*.hpp "$src/src/"*.h; do
-    [ -f "$f" ] && cp "$f" "$opencc_inc/"
-  done
-  cp "$dst/src/opencc_config.h" "$opencc_inc/" 2>/dev/null || true
-  cp "$dst/src/libopencc.a" "$SYSROOT/lib/"
-  log "OpenCC WASM library installed to $SYSROOT"
-}
-
 build_librime_wasm() {
   log "Building librime for WASM..."
   local dst="$BUILD_DIR/librime_wasm"
@@ -241,7 +169,7 @@ build_librime_wasm() {
     -DBUILD_STATIC=ON \
     -DBUILD_TEST=OFF \
     -DENABLE_LOGGING=OFF \
-    -DENABLE_OPENCC=ON \
+    -DENABLE_OPENCC=OFF \
     -DENABLE_THREADING=OFF \
     -DENABLE_TIMESTAMP=OFF \
     -DENABLE_EXTERNAL_PLUGINS=OFF \
@@ -281,7 +209,7 @@ build_native_tools() {
     -DBUILD_TEST=OFF \
     -DBUILD_SHARED_LIBS=ON \
     -DENABLE_LOGGING=OFF \
-    -DENABLE_OPENCC=ON \
+    -DENABLE_OPENCC=OFF \
     -DENABLE_EXTERNAL_PLUGINS=OFF \
     "$PROJECT_ROOT"
   cmake --build .
@@ -371,8 +299,6 @@ prepare_dist() {
 
 compile_wasm() {
   log "Compiling WASM binding..."
-  local source_data_dir="$BUILD_DIR/rime_source_data"
-  local opencc_data_dir="$BUILD_DIR/opencc_data"
   mkdir -p "$DIST_DIR"
 
   local funcs
@@ -395,9 +321,7 @@ compile_wasm() {
     -s "EXPORTED_FUNCTIONS=[$funcs]" \
     -s 'EXPORTED_RUNTIME_METHODS=["ccall","FS","getValue","setValue"]' \
     -l idbfs.js \
-    --preload-file "$opencc_data_dir@/rime/opencc" \
     -Wl,--whole-archive -lrime -Wl,--no-whole-archive \
-    -lopencc \
     -lyaml-cpp \
     -lleveldb \
     -lmarisa \
@@ -419,7 +343,7 @@ compile_wasm() {
     log "wasm-opt complete."
   fi
 
-  ls -lh "$DIST_DIR"/rime-api.js "$DIST_DIR"/rime-api.wasm "$DIST_DIR"/rime-api.data 2>/dev/null
+  ls -lh "$DIST_DIR"/rime-api.js "$DIST_DIR"/rime-api.wasm 2>/dev/null
 }
 
 # ─── Main ──────────────────────────────────────────────────────────────────
@@ -438,8 +362,6 @@ main() {
     patches)       apply_patches ;;
     boost)         build_boost ;;
     deps)          build_yaml_cpp; build_leveldb; build_marisa ;;
-    opencc-native) build_opencc_native ;;
-    opencc-wasm)   build_opencc_wasm ;;
     rime)          build_librime_wasm ;;
     source-data)   prepare_source_data ;;
     native-tools)  build_native_tools ;;
@@ -451,8 +373,6 @@ main() {
       build_yaml_cpp
       build_leveldb
       build_marisa
-      build_opencc_native
-      build_opencc_wasm
       build_librime_wasm
       prepare_source_data
       compile_wasm
@@ -466,7 +386,7 @@ main() {
       prepare_dist
       ;;
     *)
-      echo "Usage: $0 [patches|boost|deps|opencc-native|opencc-wasm|rime|source-data|native-tools|precompile|wasm|dist|all]"
+      echo "Usage: $0 [patches|boost|deps|rime|source-data|native-tools|precompile|wasm|dist|all]"
       exit 1
       ;;
   esac
