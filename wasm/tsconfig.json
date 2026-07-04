@@ -9,7 +9,7 @@
     "declaration": true,
     "outDir": "dist",
     "rootDir": "src",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "lib": ["ES2024", "DOM", "DOM.Iterable"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "build", "demo", "tests"]

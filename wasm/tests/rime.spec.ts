@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Rime WASM Engine', () => {
+test.describe('Rime WASM Engine (new API)', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     // Wait for the engine to be ready
@@ -8,9 +8,9 @@ test.describe('Rime WASM Engine', () => {
     await expect(page.locator('#input-box')).toBeEnabled();
   });
 
-  test('engine loads and shows version', async ({ page }) => {
+  test('engine loads and shows ready status', async ({ page }) => {
     const status = await page.locator('#status').textContent();
-    expect(status).toMatch(/Rime .+ ready/);
+    expect(status).toMatch(/Rime ready/);
   });
 
   test('initialization speed is reasonable', async ({ page }) => {
@@ -45,7 +45,6 @@ test.describe('Rime WASM Engine', () => {
 
     // Check that some Chinese characters are in the candidates
     const candidatesText = await page.locator('#candidates').textContent();
-    // "你" should appear somewhere in candidates for "ni"
     expect(candidatesText).toBeTruthy();
     expect(candidatesText!.length).toBeGreaterThan(0);
   });
@@ -60,10 +59,8 @@ test.describe('Rime WASM Engine', () => {
     // Press 1 to select first candidate
     await input.press('1');
 
-    // Output should have some committed text
-    const output = await page.locator('#output').textContent();
-    expect(output).toBeTruthy();
-    expect(output!.length).toBeGreaterThan(0);
+    // Output should have some committed text (async event handler, need to wait)
+    await expect(page.locator('#output')).not.toBeEmpty({ timeout: 5000 });
   });
 
   test('clicking a candidate commits text', async ({ page }) => {
@@ -77,10 +74,8 @@ test.describe('Rime WASM Engine', () => {
     // Click the first candidate
     await firstCandidate.click();
 
-    // Output should have committed text
-    const output = await page.locator('#output').textContent();
-    expect(output).toBeTruthy();
-    expect(output!.length).toBeGreaterThan(0);
+    // Async event handler: wait for output to appear
+    await expect(page.locator('#output')).not.toBeEmpty({ timeout: 5000 });
   });
 
   test('escape clears composition', async ({ page }) => {
@@ -130,9 +125,11 @@ test.describe('Rime WASM Engine', () => {
     await input.press('1');
 
     // Output should have first character
-    let output = await page.locator('#output').textContent();
-    expect(output!.length).toBeGreaterThan(0);
-    const firstLen = output!.length;
+    await expect(async () => {
+      const text = await page.locator('#output').textContent();
+      expect(text!.length).toBeGreaterThan(0);
+    }).toPass({ timeout: 5000 });
+    const firstLen = (await page.locator('#output').textContent())!.length;
 
     // Type second word
     await input.fill('hao');
@@ -140,8 +137,10 @@ test.describe('Rime WASM Engine', () => {
     await input.press('1');
 
     // Output should have both characters
-    output = await page.locator('#output').textContent();
-    expect(output!.length).toBeGreaterThan(firstLen);
+    await expect(async () => {
+      const text = await page.locator('#output').textContent();
+      expect(text!.length).toBeGreaterThan(firstLen);
+    }).toPass({ timeout: 5000 });
   });
 
   test('empty input shows no candidates', async ({ page }) => {
@@ -158,17 +157,6 @@ test.describe('Rime WASM Engine', () => {
     await expect(page.locator('#candidates li')).toHaveCount(0);
   });
 
-  test('default Traditional mode: qing shows candidates', async ({ page }) => {
-    const input = page.locator('#input-box');
-    await input.fill('qing');
-
-    await expect(page.locator('#candidates li').first()).toBeVisible({ timeout: 5000 });
-
-    // Default zh_simp=0 (Traditional), candidates should contain Chinese
-    const firstText = await page.locator('#candidates li').first().textContent();
-    expect(firstText).toBeTruthy();
-  });
-
   test('zh_simp toggle works', async ({ page }) => {
     // Click toggle to enable Simplified mode (zh_simp=1)
     await page.locator('#toggle-simp').click();
@@ -182,37 +170,48 @@ test.describe('Rime WASM Engine', () => {
     await expect(page.locator('#toggle-simp')).toHaveClass(/active/);
   });
 
-  test('precompile runs and produces correct output files', async ({ page }) => {
-    // Navigate to the precompile test page (tests both loadCompiled + compileAndLoad)
-    await page.goto('/precompile.html');
-    
-    // Wait for result to show success
-    await expect(page.locator('#result')).toContainText('success', { timeout: 300000 });
-    
-    const resultText = await page.locator('#result').textContent();
-    expect(resultText).toContain('success');
+  test('default Traditional mode: qing shows candidates', async ({ page }) => {
+    const input = page.locator('#input-box');
+    await input.fill('qing');
+
+    await expect(page.locator('#candidates li').first()).toBeVisible({ timeout: 5000 });
+
+    // Default zh_simp=0 (Traditional), candidates should contain Chinese
+    const firstText = await page.locator('#candidates li').first().textContent();
+    expect(firstText).toBeTruthy();
   });
+});
 
-  test.describe('Cache persistence', () => {
-    test('cache-test.html: loadCache works after loadCompiled', async ({ page }) => {
-      await page.goto('/cache-test.html');
+test.describe('Precompile tests', () => {
+  test('precompile compile from source succeeds', async ({ page }) => {
+    test.setTimeout(300000);
+    await page.goto('/precompile.html');
+    // Wait for the result to show success
+    await expect(page.locator('#result')).toContainText('success', { timeout: 120000 });
+    const result = await page.locator('#result').textContent();
+    console.log('Precompile result:', result);
+    expect(result).toContain('success');
+  });
+});
 
-      // Wait for the result to show success
-      await expect(page.locator('#result')).toContainText('success', { timeout: 300000 });
+test.describe('Cache tests', () => {
+  test('cache lifecycle works', async ({ page }) => {
+    test.setTimeout(300000);
+    await page.goto('/cache-test.html');
+    await expect(page.locator('#result')).toContainText('success', { timeout: 120000 });
+    const result = await page.locator('#result').textContent();
+    console.log('Cache test result:', result);
+    expect(result).toContain('success');
+  });
+});
 
-      const resultText = await page.locator('#result').textContent();
-      expect(resultText).toContain('success');
-    });
-
-    test('cache-scenarios: comprehensive cache edge cases', async ({ page }) => {
-      await page.goto('/cache-scenarios.html');
-
-      // Wait for result
-      await expect(page.locator('#result')).toContainText('success', { timeout: 300000 });
-
-      const resultText = await page.locator('#result').textContent();
-      // "success" means at least the core tests (1-3) passed
-      expect(resultText).toContain('success');
-    });
+test.describe('Cache scenario tests', () => {
+  test('cache scenarios all pass', async ({ page }) => {
+    test.setTimeout(300000);
+    await page.goto('/cache-scenarios.html');
+    await expect(page.locator('#result')).toContainText('success', { timeout: 120000 });
+    const result = await page.locator('#result').textContent();
+    console.log('Cache scenarios result:', result);
+    expect(result).toContain('success');
   });
 });

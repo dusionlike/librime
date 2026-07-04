@@ -1,6 +1,7 @@
-import type { RimeEngine, RimeState, RimeWasmOptions, CompiledFiles, SourceFiles, CompiledBuffers, SourceBuffers } from './types';
+import 'core-js/proposals/promise-with-resolvers';
+import type { RimeEngine, RimeState, RimeWasmOptions } from './types';
 
-export type { RimeEngine, RimeState, RimeCandidate, RimeWasmOptions, CompiledFiles, SourceFiles, CompiledBuffers, SourceBuffers } from './types';
+export type { RimeEngine, RimeState, RimeCandidate, RimeWasmOptions } from './types';
 
 interface EmscriptenModule {
   ccall(
@@ -31,7 +32,6 @@ function syncfs(module: EmscriptenModule, populate: boolean): Promise<void> {
 
 async function loadModule(wasmDir: string): Promise<EmscriptenModule> {
   const scriptUrl = `${wasmDir}/rime-api.js`;
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const createRimeModule = (
     await import(/* @vite-ignore */ /* webpackIgnore: true */ scriptUrl)
   ).default;
@@ -58,23 +58,38 @@ function writeBuffers(
   }
 }
 
-/**
- * 检查 /rime/build 目录中是否存在缓存数据（通过检查 default.yaml 是否存在）。
- */
-function checkBuildCache(module: EmscriptenModule): boolean {
+/** 读取 /rime/build/.version 文件内容，无缓存时返回 null。 */
+function readVersionFile(module: EmscriptenModule): string | null {
   try {
-    module.FS.readFile('/rime/build/default.yaml');
-    return true;
+    const data = module.FS.readFile('/rime/build/.version');
+    return new TextDecoder().decode(data).trim();
   } catch {
-    return false;
+    return null;
   }
 }
 
+/** 将版本号写入 /rime/build/.version。 */
+function writeVersionFile(module: EmscriptenModule, version: string): void {
+  module.FS.writeFile('/rime/build/.version', new TextEncoder().encode(version));
+}
+
+/** 默认源词库文件名列表（均在 source/ 目录下）。 */
+const DEFAULT_SOURCE_FILES = [
+  'default.yaml',
+  'luna_pinyin.schema.yaml',
+  'luna_pinyin.dict.yaml',
+  'symbols.yaml',
+  'essay.txt',
+] as const;
+
 /**
  * 创建 Rime 输入法引擎实例。
- * 此方法只加载 WASM 模块，不加载词库数据。
- * 加载词库需要调用 loadCompiled / compileAndLoad 或对应的 FromBuffers 方法。
- * 如果已有缓存，也可以调用 loadCache 直接从 IndexedDB 恢复。
+ *
+ * 内部自动处理数据加载逻辑：
+ * 1. 如果传入了 dictVersion，优先比对 IndexedDB 中的 .version 缓存；
+ *    若版本匹配则直接加载缓存，跳过下载。
+ * 2. 若版本不匹配或无缓存，自动下载默认源词库并编译。
+ * 3. 初始化引擎后自动将版本号写入 IndexedDB 以供后续比对。
  */
 export async function createRimeEngine(
   options: RimeWasmOptions = {},
@@ -95,119 +110,168 @@ export async function createRimeEngine(
 
   let loaded = false;
   let destroyed = false;
+  // 互斥锁：所有操作串行化，syncData 运行时其他操作自动排队
+  let mutex = Promise.resolve();
 
-  async function initEngine(): Promise<void> {
+  function withMutex<T>(fn: () => Promise<T> | T): Promise<T> {
+    const prev = mutex;
+    const next = Promise.withResolvers<void>();
+    mutex = next.promise;
+    return prev.then(() => {
+      try {
+        return Promise.resolve(fn()).finally(next.resolve);
+      } catch (e) {
+        next.resolve();
+        throw e;
+      }
+    });
+  }
+
+  function checkAlive() {
+    if (destroyed) throw new Error('引擎已被销毁');
+    if (!loaded) throw new Error('引擎未初始化');
+  }
+
+  async function initEngine(version?: string): Promise<void> {
     const rc = Module.ccall('rime_wasm_init', 'number', [], []) as number;
     if (rc !== 0) {
       throw new Error(`rime_wasm_init 失败，返回码: ${rc}`);
     }
     loaded = true;
+    if (version !== undefined) {
+      writeVersionFile(Module, version);
+    }
     // 将 /rime/build 和 /rime_user 的变更写回 IndexedDB
     await syncfs(Module, false);
   }
 
-  function callJson(fn: string, argTypes: string[], args: unknown[]): RimeState {
-    if (destroyed) throw new Error('引擎已被销毁');
-    if (!loaded) throw new Error('引擎未初始化，请先调用 loadCompiled / compileAndLoad');
+  async function callJsonAsync(fn: string, argTypes: string[], args: unknown[]): Promise<RimeState> {
+    checkAlive();
     const json = Module.ccall(fn, 'string', argTypes, args) as string;
     return JSON.parse(json) as RimeState;
   }
 
+  // ---- 内部数据加载逻辑 ----
+
+  const loading = Promise.withResolvers<void>();
+
+  /**
+   * 尝试从 IndexedDB 缓存加载预编译数据。
+   * 若 dictVersion 已设置：比对 .version 文件内容；
+   * 若未设置：检查 .version 是否存在。
+   */
+  async function loadFromCache(): Promise<boolean> {
+    const cachedVersion = readVersionFile(Module);
+    if (options.dictVersion !== undefined) {
+      return cachedVersion === options.dictVersion;
+    }
+    return cachedVersion !== null;
+  }
+
+  /** 负责一次性的数据加载与引擎初始化。 */
+  async function loadData(): Promise<void> {
+    // 优先尝试加载缓存
+    if (await loadFromCache()) {
+      await initEngine(options.dictVersion);
+      return;
+    }
+
+    // 缓存未命中，下载默认源词库并编译
+    const buffers: Record<string, Uint8Array> = {};
+    for (const file of DEFAULT_SOURCE_FILES) {
+      buffers[file] = await fetchBuffer(`source/${file}`);
+    }
+    writeBuffers(Module, buffers, '/rime');
+    const rc = Module.ccall('rime_wasm_precompile', 'number', [], []) as number;
+    if (rc !== 0) {
+      throw new Error(`rime_wasm_precompile 失败，返回码: ${rc}`);
+    }
+    await initEngine(options.dictVersion);
+  }
+
+  // 执行数据加载与初始化，完成后标记就绪
+  try {
+    await loadData();
+  } finally {
+    loading.resolve();
+  }
+
   const engine: RimeEngine = {
-    async loadCompiled(files: CompiledFiles): Promise<RimeEngine> {
-      if (loaded) throw new Error('引擎已初始化，请勿重复调用');
-      const buffers: Record<string, Uint8Array> = {};
-      for (const [file, url] of Object.entries(files)) {
-        buffers[file] = await fetchBuffer(url as string);
-      }
-      writeBuffers(Module, buffers, '/rime/build');
-      await initEngine();
-      return engine;
+    async processInput(keys: string): Promise<RimeState> {
+      return withMutex(async () => {
+        return callJsonAsync('rime_wasm_process_input', ['string'], [keys]);
+      });
     },
 
-    async compileAndLoad(files: SourceFiles): Promise<RimeEngine> {
-      if (loaded) throw new Error('引擎已初始化，请勿重复调用');
-      const buffers: Record<string, Uint8Array> = {};
-      for (const [file, url] of Object.entries(files)) {
-        buffers[file] = await fetchBuffer(url as string);
-      }
-      writeBuffers(Module, buffers, '/rime');
-      const rc = Module.ccall('rime_wasm_precompile', 'number', [], []) as number;
-      if (rc !== 0) {
-        throw new Error(`rime_wasm_precompile 失败，返回码: ${rc}`);
-      }
-      await initEngine();
-      return engine;
+    async pickCandidate(index: number): Promise<RimeState> {
+      return withMutex(async () => {
+        const state = await callJsonAsync('rime_wasm_pick_candidate', ['number'], [index]);
+        // pickCandidate 会更新用户词典，同步到 IndexedDB
+        await syncfs(Module, false);
+        return state;
+      });
     },
 
-    async loadCompiledFromBuffers(buffers: CompiledBuffers): Promise<RimeEngine> {
-      if (loaded) throw new Error('引擎已初始化，请勿重复调用');
-      writeBuffers(Module, buffers, '/rime/build');
-      await initEngine();
-      return engine;
+    async flipPage(forward: boolean): Promise<RimeState> {
+      return withMutex(async () => {
+        return callJsonAsync('rime_wasm_flip_page', ['number'], [forward ? 0 : 1]);
+      });
     },
 
-    async compileAndLoadFromBuffers(buffers: SourceBuffers): Promise<RimeEngine> {
-      if (loaded) throw new Error('引擎已初始化，请勿重复调用');
-      writeBuffers(Module, buffers, '/rime');
-      const rc = Module.ccall('rime_wasm_precompile', 'number', [], []) as number;
-      if (rc !== 0) {
-        throw new Error(`rime_wasm_precompile 失败，返回码: ${rc}`);
-      }
-      await initEngine();
-      return engine;
+    async clearInput(): Promise<void> {
+      return withMutex(async () => {
+        if (destroyed || !loaded) return;
+        Module.ccall('rime_wasm_clear_input', null, [], []);
+      });
     },
 
-    async hasCache(): Promise<boolean> {
-      if (destroyed) throw new Error('引擎已被销毁');
-      // 重新从 IndexedDB 同步，确保拿到最新状态
-      await syncfs(Module, true);
-      return checkBuildCache(Module);
+    async setOption(name: string, value: boolean): Promise<void> {
+      return withMutex(async () => {
+        if (destroyed || !loaded) return;
+        Module.ccall('rime_wasm_set_option', null, ['string', 'number'], [name, value ? 1 : 0]);
+      });
     },
 
-    async loadCache(): Promise<RimeEngine> {
-      if (loaded) throw new Error('引擎已初始化，请勿重复调用');
-      if (!checkBuildCache(Module)) {
-        throw new Error('缓存中无预编译数据，请先调用 loadCompiled / compileAndLoad');
-      }
-      await initEngine();
-      return engine;
+    getDictVersion(): string | null {
+      if (destroyed) return null;
+      return readVersionFile(Module);
     },
 
-    processInput(keys: string): RimeState {
-      return callJson('rime_wasm_process_input', ['string'], [keys]);
+    whenReady(): Promise<void> {
+      return loading.promise;
     },
 
-    pickCandidate(index: number): RimeState {
-      const state = callJson('rime_wasm_pick_candidate', ['number'], [index]);
-      syncfs(Module, false).catch(() => {});
-      return state;
+    /**
+     * 将用户词典数据同步到 IndexedDB 持久化存储。
+     *
+     * 内部流程：
+     *   sync_user_data（LevelDB → FS）
+     *   → syncfs（FS → IndexedDB）
+     *   → create_session（重建 session，因为 sync_user_data 会销毁 session）
+     *
+     * 同步期间其他操作通过互斥锁自动排队等待。
+     * 推荐调用时机：输入框失去焦点时，或调用 destroy 前。
+     */
+    async syncData(): Promise<void> {
+      return withMutex(async () => {
+        if (destroyed) return;
+        Module.ccall('rime_wasm_sync_data', null, [], []);
+        await syncfs(Module, false);
+        const sid = Module.ccall('rime_wasm_create_session', 'number', [], []) as number;
+        if (!sid) {
+          throw new Error('同步后重建 session 失败');
+        }
+      });
     },
 
-    flipPage(forward: boolean): RimeState {
-      return callJson('rime_wasm_flip_page', ['number'], [forward ? 0 : 1]);
-    },
-
-    clearInput(): void {
-      if (destroyed) return;
-      Module.ccall('rime_wasm_clear_input', null, [], []);
-    },
-
-    setOption(name: string, value: boolean): void {
-      if (destroyed) return;
-      Module.ccall('rime_wasm_set_option', null, ['string', 'number'], [name, value ? 1 : 0]);
-    },
-
-    getVersion(): string {
-      if (destroyed) return 'unknown';
-      return Module.ccall('rime_wasm_get_version', 'string', [], []) as string;
-    },
-
-    destroy(): void {
+    async destroy(): Promise<void> {
       if (destroyed) return;
       destroyed = true;
+      loaded = false;
       Module.ccall('rime_wasm_destroy', null, [], []);
-      syncfs(Module, false).catch(() => {});
+      try {
+        await syncfs(Module, false);
+      } catch { /* ignore */ }
     },
   };
 

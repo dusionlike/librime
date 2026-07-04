@@ -26,64 +26,34 @@ export interface RimeState {
   selectLabels: string[];
 }
 
-/** 预编译数据的文件列表（键为文件名，值为 URL） */
-export interface CompiledFiles {
-  'default.yaml': string;
-  'luna_pinyin.schema.yaml': string;
-  'luna_pinyin.table.bin': string;
-  'luna_pinyin.prism.bin': string;
-  'luna_pinyin.reverse.bin': string;
-}
-
-/** 源数据文件列表（键为文件名，值为 URL） */
-export interface SourceFiles {
-  'default.yaml': string;
-  'luna_pinyin.schema.yaml': string;
-  'luna_pinyin.dict.yaml': string;
-  'symbols.yaml': string;
-  'essay.txt': string;
-}
-
-/** 预编译数据的缓冲区（键为文件名，值为二进制内容） */
-export type CompiledBuffers = {
-  [K in keyof CompiledFiles]: Uint8Array;
-};
-
-/** 源数据的缓冲区（键为文件名，值为二进制内容） */
-export type SourceBuffers = {
-  [K in keyof SourceFiles]: Uint8Array;
-};
-
 export interface RimeEngine {
-  /** 从 URL 获取预编译好的词典数据并初始化引擎。 */
-  loadCompiled(files: CompiledFiles): Promise<RimeEngine>;
-  /** 从 URL 获取源数据文件，在 WASM 中编译并初始化引擎。 */
-  compileAndLoad(files: SourceFiles): Promise<RimeEngine>;
-  /** 从内存缓冲区加载预编译好的词典数据并初始化引擎。 */
-  loadCompiledFromBuffers(buffers: CompiledBuffers): Promise<RimeEngine>;
-  /** 从内存缓冲区获取源数据，在 WASM 中编译并初始化引擎。 */
-  compileAndLoadFromBuffers(buffers: SourceBuffers): Promise<RimeEngine>;
-  /** 检查是否存在缓存的预编译数据（/rime/build 中是否有已持久化的词库文件）。 */
-  hasCache(): Promise<boolean>;
-  /** 从 IndexedDB 缓存加载预编译数据并初始化引擎，无需重新下载或编译。 */
-  loadCache(): Promise<RimeEngine>;
   /** 发送按键序列（如 "nihao"）并获取更新后的状态。 */
-  processInput(keys: string): RimeState;
-  /** 在当前页按索引选择候选词。 */
-  pickCandidate(index: number): RimeState;
+  processInput(keys: string): Promise<RimeState>;
+  /** 在当前页按索引选择候选词。选词后自动持久化到 IndexedDB。 */
+  pickCandidate(index: number): Promise<RimeState>;
   /** 翻到候选词的下一页或上一页。 */
-  flipPage(forward: boolean): RimeState;
+  flipPage(forward: boolean): Promise<RimeState>;
   /** 清除当前输入。 */
-  clearInput(): void;
-  /** 设置布尔选项（如 "ascii_mode"）。 */
-  setOption(name: string, value: boolean): void;
-  /** 获取 librime 版本号字符串。 */
-  getVersion(): string;
-  /** 关闭引擎并释放资源。 */
-  destroy(): void;
+  clearInput(): Promise<void>;
+  /** 设置布尔选项（如 "ascii_mode"、"zh_simp"）。 */
+  setOption(name: string, value: boolean): Promise<void>;
+  /** 获取已缓存的词库版本号，无缓存则返回 null。 */
+  getDictVersion(): string | null;
+  /** 等待引擎就绪（加载/初始化/同步完成后返回）。 */
+  whenReady(): Promise<void>;
+  /**
+   * 将用户词典数据同步到 IndexedDB 持久化存储。
+   * 内部流程：LevelDB→sync_user_data（刷写到 FS）→syncfs（写入 IndexedDB）→重建 session。
+   * 推荐调用时机：输入框失去焦点时、定时、或调用 destroy 前。
+   */
+  syncData(): Promise<void>;
+  /** 关闭引擎并释放资源。执行前会自动同步用户词典数据。 */
+  destroy(): Promise<void>;
 }
 
 export interface RimeWasmOptions {
   /** rime-api.js、rime-api.wasm 所在 URL 或路径前缀。默认为当前目录。 */
   wasmDir?: string;
+  /** 词库版本号。传入后自动比对 IndexedDB 缓存，版本一致则跳过下载直接加载缓存。 */
+  dictVersion?: string;
 }

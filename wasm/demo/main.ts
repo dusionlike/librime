@@ -47,9 +47,8 @@ function renderState(state: RimeState) {
     let html = `<strong>${label}.</strong> ${escapeHtml(cand.text)}`;
     li.innerHTML = html;
     if (i === state.highlightedIndex) li.className = 'active';
-    li.addEventListener('click', () => {
-      const newState = engine.pickCandidate(i);
-      renderState(newState);
+    li.addEventListener('click', async () => {
+      renderState(await engine.pickCandidate(i));
     });
     candidatesEl.appendChild(li);
   });
@@ -59,8 +58,8 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function clearState() {
-  engine.clearInput();
+async function clearState() {
+  await engine.clearInput();
   preeditEl.innerHTML = '';
   pageInfoEl.textContent = '';
   candidatesEl.innerHTML = '';
@@ -73,37 +72,36 @@ async function main() {
   try {
     statusEl.textContent = 'Loading Rime WASM...';
 
-    // 第一步：加载 WASM 模块
+    // 一步到位：加载 WASM + 加载预编译数据，createRimeEngine 内部处理缓存
     engine = await createRimeEngine({ wasmDir: '' });
 
-    // 第二步：加载预编译好的数据（从 dist/bin/）
-    statusEl.textContent = 'Loading pre-compiled data...';
-    await engine.loadCompiled({
-      'default.yaml': 'bin/default.yaml',
-      'luna_pinyin.schema.yaml': 'bin/luna_pinyin.schema.yaml',
-      'luna_pinyin.table.bin': 'bin/luna_pinyin.table.bin',
-      'luna_pinyin.prism.bin': 'bin/luna_pinyin.prism.bin',
-      'luna_pinyin.reverse.bin': 'bin/luna_pinyin.reverse.bin',
-    });
-
     const elapsed = Math.round(performance.now() - t0);
-    const version = engine.getVersion();
-    statusEl.textContent = `Rime ${version} ready (loaded in ${elapsed}ms)`;
+    const version = engine.getDictVersion();
+    statusEl.textContent = `Rime ready (loaded in ${elapsed}ms)` + (version ? `, dictVersion: ${version}` : '');
     statusEl.className = 'ready';
     inputEl.disabled = false;
     inputEl.focus();
 
+    // 输入框失去焦点时将用户词典持久化到 IndexedDB
+    // 使用 setTimeout(0) 将 sync 推迟到 click 事件（选词）之后执行，
+    // 避免 blur 先于 click 触发导致 syncData 抢占了 mutex
+    inputEl.addEventListener('blur', () => {
+      setTimeout(() => {
+        engine.syncData().catch(() => {});
+      }, 0);
+    });
+
     // Toggle Traditional/Simplified
-    toggleSimpEl.addEventListener('click', () => {
+    toggleSimpEl.addEventListener('click', async () => {
       isSimplified = !isSimplified;
-      engine.setOption('zh_simp', isSimplified);
+      await engine.setOption('zh_simp', isSimplified);
       toggleSimpEl.classList.toggle('active', isSimplified);
       toggleSimpEl.textContent = isSimplified ? '简' : '繁';
     });
 
     // Next page (forward)
-    nextPageEl.addEventListener('click', () => {
-      renderState(engine.flipPage(true));
+    nextPageEl.addEventListener('click', async () => {
+      renderState(await engine.flipPage(true));
     });
   } catch (e) {
     statusEl.textContent = `Error: ${e}`;
@@ -112,14 +110,11 @@ async function main() {
     return;
   }
 
-  // Track composition state for incremental input
-  let lastInput = '';
-
-  inputEl.addEventListener('keydown', (ev) => {
+  inputEl.addEventListener('keydown', async (ev) => {
     // Escape clears composition
     if (ev.key === 'Escape') {
-      clearState();
       ev.preventDefault();
+      await clearState();
       return;
     }
 
@@ -127,49 +122,45 @@ async function main() {
     if (ev.key >= '1' && ev.key <= '9' && candidatesEl.children.length > 0) {
       const index = parseInt(ev.key) - 1;
       if (index < candidatesEl.children.length) {
-        const state = engine.pickCandidate(index);
-        renderState(state);
-        lastInput = '';
         ev.preventDefault();
+        const state = await engine.pickCandidate(index);
+        renderState(state);
         return;
       }
     }
 
     // Page navigation
     if (ev.key === 'PageDown' || (ev.key === '=' && candidatesEl.children.length > 0)) {
-      renderState(engine.flipPage(true));
       ev.preventDefault();
+      renderState(await engine.flipPage(true));
       return;
     }
     if (ev.key === 'PageUp' || (ev.key === '-' && candidatesEl.children.length > 0)) {
-      renderState(engine.flipPage(false));
       ev.preventDefault();
+      renderState(await engine.flipPage(false));
       return;
     }
 
     // Enter commits current composition
     if (ev.key === 'Enter' && candidatesEl.children.length > 0) {
-      const state = engine.pickCandidate(0);
-      renderState(state);
-      lastInput = '';
       ev.preventDefault();
+      const state = await engine.pickCandidate(0);
+      renderState(state);
       return;
     }
   });
 
-  inputEl.addEventListener('input', () => {
+  inputEl.addEventListener('input', async () => {
     const val = inputEl.value;
     if (!val) {
-      clearState();
-      lastInput = '';
+      await clearState();
       return;
     }
 
     // Reset and re-process the full input each time
-    engine.clearInput();
-    const state = engine.processInput(val);
+    await engine.clearInput();
+    const state = await engine.processInput(val);
     renderState(state);
-    lastInput = val;
   });
 }
 

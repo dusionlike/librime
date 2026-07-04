@@ -101,6 +101,17 @@ boost::json::object build_state() {
 
 }  // namespace rime_wasm
 
+// ─── Helper: create session & init commit/context ──────────────────────
+namespace rime_wasm {
+bool ensure_session() {
+  session = api->create_session();
+  if (!session) return false;
+  RIME_STRUCT_INIT(RimeCommit, commit);
+  RIME_STRUCT_INIT(RimeContext, context);
+  return true;
+}
+}  // namespace rime_wasm
+
 extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
@@ -121,12 +132,7 @@ int rime_wasm_init() {
   api->setup(&traits);
   api->initialize(&traits);
 
-  // Create session
-  session = api->create_session();
-  if (!session) return -2;
-
-  RIME_STRUCT_INIT(RimeCommit, commit);
-  RIME_STRUCT_INIT(RimeContext, context);
+  if (!ensure_session()) return -2;
   engine_started = true;
 
   return 0;
@@ -181,9 +187,26 @@ const char* rime_wasm_get_version() {
 }
 
 EMSCRIPTEN_KEEPALIVE
+void rime_wasm_sync_data() {
+  using namespace rime_wasm;
+  if (!api) return;
+  // sync_user_data 内部会调用 CleanupAllSessions 销毁所有 session
+  api->sync_user_data();
+  session = 0;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int rime_wasm_create_session() {
+  using namespace rime_wasm;
+  if (!api) return 0;
+  return ensure_session() ? static_cast<int>(session) : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE
 void rime_wasm_destroy() {
   using namespace rime_wasm;
   if (!api) return;
+  api->sync_user_data();
   if (session) {
     api->destroy_session(session);
     session = 0;

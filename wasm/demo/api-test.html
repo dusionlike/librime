@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rime WASM API Test (New API)</title>
+</head>
+<body>
+  <h1>Rime WASM API Test (New API)</h1>
+  <pre id="result">Running...</pre>
+  <pre id="detail"></pre>
+
+  <script type="module">
+    import { createRimeEngine } from '../src/index';
+
+    async function run() {
+      const resultEl = document.getElementById('result');
+      const detailEl = document.getElementById('detail');
+      let allPassed = true;
+
+      function log(msg) {
+        detailEl.textContent += msg + '\n';
+      }
+
+      function assert(cond, label) {
+        if (cond) {
+          log('  PASS: ' + label);
+        } else {
+          log('  FAIL: ' + label);
+          allPassed = false;
+        }
+      }
+
+      // ===== Test 1: 创建引擎并输入 =====
+      try {
+        log('\n=== Test 1: createRimeEngine + processInput ===');
+
+        const engine = await createRimeEngine({ wasmDir: '' });
+
+        assert(typeof engine === 'object', 'engine is object');
+        assert(typeof engine.processInput === 'function', 'processInput exists');
+        assert(typeof engine.pickCandidate === 'function', 'pickCandidate exists');
+        assert(typeof engine.flipPage === 'function', 'flipPage exists');
+        assert(typeof engine.clearInput === 'function', 'clearInput exists');
+        assert(typeof engine.setOption === 'function', 'setOption exists');
+        assert(typeof engine.getDictVersion === 'function', 'getDictVersion exists');
+        assert(typeof engine.whenReady === 'function', 'whenReady exists');
+        assert(typeof engine.syncData === 'function', 'syncData exists');
+        assert(typeof engine.destroy === 'function', 'destroy exists');
+
+        // 验证旧方法已被删除
+        assert(engine.loadCompiled === undefined, 'loadCompiled is removed');
+        assert(engine.compileAndLoad === undefined, 'compileAndLoad is removed');
+        assert(engine.loadCompiledFromBuffers === undefined, 'loadCompiledFromBuffers is removed');
+        assert(engine.compileAndLoadFromBuffers === undefined, 'compileAndLoadFromBuffers is removed');
+        assert(engine.hasCache === undefined, 'hasCache is removed');
+        assert(engine.loadCache === undefined, 'loadCache is removed');
+
+        const state = await engine.processInput('nihao');
+        assert(state.candidates.length > 0, 'candidates returned for "nihao"');
+        assert(state.preeditBody.length > 0, 'preeditBody is non-empty');
+
+        await engine.destroy();
+        log('  PASS: Test 1 complete');
+      } catch (e) {
+        log('  FAIL: Test 1 exception: ' + e);
+        allPassed = false;
+      }
+
+      // ===== Test 2: dictVersion 缓存测试 =====
+      try {
+        log('\n=== Test 2: dictVersion caching ===');
+
+        // 第一次：带 version 初始化，会下载+编译并写入缓存
+        let engine = await createRimeEngine({
+          wasmDir: '',
+          dictVersion: 'test-v1',
+        });
+
+        let dictVer = engine.getDictVersion();
+        assert(dictVer === 'test-v1', "dictVersion is 'test-v1', got: " + dictVer);
+        await engine.destroy();
+
+        // 第二次：相同 version，应直接从缓存恢复
+        log('  Attempting second init with same dictVersion (should use cache)...');
+        engine = await createRimeEngine({
+          wasmDir: '',
+          dictVersion: 'test-v1',
+        });
+
+        const state = await engine.processInput('nihao');
+        assert(state.candidates.length > 0, 'cache load: candidates ok');
+        dictVer = engine.getDictVersion();
+        assert(dictVer === 'test-v1', "cache load: dictVersion is 'test-v1', got: " + dictVer);
+        await engine.destroy();
+        log('  PASS: Test 2 complete');
+      } catch (e) {
+        log('  FAIL: Test 2 exception: ' + e);
+        allPassed = false;
+      }
+
+      // ===== Test 3: whenReady =====
+      try {
+        log('\n=== Test 3: whenReady ===');
+
+        const engine = await createRimeEngine({ wasmDir: '' });
+        await engine.whenReady();
+        log('  whenReady resolved immediately after creation');
+
+        const state = await engine.processInput('nihao');
+        assert(state.candidates.length > 0, 'input works after whenReady');
+        await engine.destroy();
+        log('  PASS: Test 3 complete');
+      } catch (e) {
+        log('  FAIL: Test 3 exception: ' + e);
+        allPassed = false;
+      }
+
+      // ===== Test 4: 多次 destroy/create =====
+      try {
+        log('\n=== Test 4: destroy/create cycle ===');
+
+        for (let i = 0; i < 3; i++) {
+          const engine = await createRimeEngine({ wasmDir: '' });
+
+          const state = await engine.processInput('nihao');
+          assert(state.candidates.length > 0, 'iteration ' + (i + 1) + ': candidates ok');
+          await engine.destroy();
+        }
+        log('  PASS: Test 4 complete');
+      } catch (e) {
+        log('  FAIL: Test 4 exception: ' + e);
+        allPassed = false;
+      }
+
+      resultEl.textContent = allPassed ? 'ALL PASSED' : 'SOME TESTS FAILED';
+      resultEl.style.color = allPassed ? 'green' : 'red';
+    }
+
+    run();
+  </script>
+</body>
+</html>

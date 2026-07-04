@@ -18,50 +18,45 @@
       const detailEl = document.getElementById('detail');
 
       try {
-        // ---- 第一次加载：从 URL 加载预编译数据 ----
-        resultEl.textContent = 'Phase 1: First load (loadCompiled)...';
-        let engine = await createRimeEngine({ wasmDir: '' });
-        let hasCacheBefore = await engine.hasCache();
-        detailEl.textContent += `hasCache before load: ${hasCacheBefore}\n`;
+        // ---- 第一次加载：带 dictVersion + 编译数据，写入缓存 ----
+        resultEl.textContent = 'Phase 1: First load with dictVersion...';
+        detailEl.textContent = '';
 
-        await engine.loadCompiled({
-          'default.yaml': 'bin/default.yaml',
-          'luna_pinyin.schema.yaml': 'bin/luna_pinyin.schema.yaml',
-          'luna_pinyin.table.bin': 'bin/luna_pinyin.table.bin',
-          'luna_pinyin.prism.bin': 'bin/luna_pinyin.prism.bin',
-          'luna_pinyin.reverse.bin': 'bin/luna_pinyin.reverse.bin',
+        let engine = await createRimeEngine({
+          wasmDir: '',
+          dictVersion: 'test-v1',
         });
 
-        let state = engine.processInput('nihao');
-        let firstResult = state.candidates?.length > 0 ? 'candidates ok' : 'no candidates';
-        detailEl.textContent += `First load: ${firstResult}\n`;
+        let state = await engine.processInput('nihao');
+        let firstResult = state.candidates && state.candidates.length > 0 ? 'candidates ok' : 'no candidates';
+        detailEl.textContent += 'First load: ' + firstResult + '\n';
+
+        let ver = engine.getDictVersion();
+        detailEl.textContent += 'dictVersion after first load: ' + ver + '\n';
         engine.destroy();
 
-        // ---- 第二次加载：从缓存恢复 ----
-        resultEl.textContent = 'Phase 2: Load from cache...';
-        engine = await createRimeEngine({ wasmDir: '' });
-        hasCacheBefore = await engine.hasCache();
-        detailEl.textContent += `hasCache after first load: ${hasCacheBefore}\n`;
+        // ---- 第二次加载：相同 dictVersion，不传 data，靠缓存恢复 ----
+        resultEl.textContent = 'Phase 2: Load from cache (no data)...';
 
-        if (hasCacheBefore) {
-          await engine.loadCache();
-          state = engine.processInput('nihao');
-          let cacheResult = state.candidates?.length > 0 ? 'candidates ok' : 'no candidates';
-          detailEl.textContent += `Cache load: ${cacheResult}\n`;
+        engine = await createRimeEngine({
+          wasmDir: '',
+          dictVersion: 'test-v1',
+        });
 
-          // 如果没有缓存就应该失败，这里验证缓存能正常输入
-          if (state.candidates && state.candidates.length > 0) {
-            resultEl.textContent = 'success - cache works';
-          } else {
-            throw new Error('Cache loaded but no candidates');
-          }
+        ver = engine.getDictVersion();
+        detailEl.textContent += 'dictVersion after cache load: ' + ver + '\n';
+
+        state = await engine.processInput('nihao');
+        if (state.candidates && state.candidates.length > 0) {
+          detailEl.textContent += 'Cache load: candidates ok\n';
+          resultEl.textContent = 'success - cache works';
         } else {
-          throw new Error('Expected cache to exist after first load');
+          throw new Error('Cache loaded but no candidates');
         }
 
         engine.destroy();
       } catch (e) {
-        resultEl.textContent = `error: ${e}`;
+        resultEl.textContent = 'error: ' + e;
         console.error('Cache test failed:', e);
       }
     }

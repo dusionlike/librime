@@ -28,5 +28,8 @@
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
   },
-  "license": "BSD-3-Clause"
+  "license": "BSD-3-Clause",
+  "dependencies": {
+    "core-js": "^3.49.0"
+  }
 }

@@ -22,105 +22,109 @@
         detailEl.textContent += msg + '\n';
       }
 
-      // ---- Test 1: hasCache / loadCache basic ----
+      // ---- Test 1: 无 dictVersion 且无缓存，裸初始化 ----
       try {
-        log('Test 1: create engine, check hasCache, try loadCache...');
+        log('Test 1: 裸初始化 (no dictVersion, no data)...');
 
         const engine = await createRimeEngine({ wasmDir: '' });
-        const hasCacheNow = await engine.hasCache();
-        log('  hasCache = ' + hasCacheNow);
-
-        if (hasCacheNow) {
-          // Cache exists from a previous test — verify loadCache works
-          await engine.loadCache();
-          const state = engine.processInput('nihao');
-          const ok = state.candidates && state.candidates.length > 0;
-          log('  loadCache from existing cache \u2192 candidates: ' + (ok ? 'PASS' : 'FAIL'));
-          if (!ok) { allPassed = false; }
+        const ver = engine.getDictVersion();
+        log('  getDictVersion = ' + ver);
+        // 没有缓存过，version 应为 null
+        if (ver === null) {
+          log('  PASS: no version (expected)');
         } else {
-          // No cache — verify loadCache throws
-          try {
-            await engine.loadCache();
-            log('  FATAL: loadCache should have thrown!');
-            allPassed = false;
-          } catch (err) {
-            log('  loadCache correctly threw (no cache) \u2192 PASS');
-          }
+          log('  WARN: version is ' + ver + ' (may be from previous tests)');
         }
+        await engine.processInput('nihao'); // 不崩溃即可
+        log('  processInput did not crash \u2192 PASS');
         engine.destroy();
       } catch (e) {
         allPassed = false;
-        log('  FAIL: ' + e.message + '\n' + (e.stack || ''));
+        log('  FAIL: ' + e.message);
       }
 
-      // ---- Test 2: after loadCompiled, hasCache returns true ----
+      // ---- Test 2: 带 dictVersion 初始化，写入缓存 ----
       try {
-        log('Test 2: loadCompiled then check hasCache...');
+        log('Test 2: 带 dictVersion 初始化...');
 
-        let engine = await createRimeEngine({ wasmDir: '' });
-        await engine.loadCompiled({
-          'default.yaml': 'bin/default.yaml',
-          'luna_pinyin.schema.yaml': 'bin/luna_pinyin.schema.yaml',
-          'luna_pinyin.table.bin': 'bin/luna_pinyin.table.bin',
-          'luna_pinyin.prism.bin': 'bin/luna_pinyin.prism.bin',
-          'luna_pinyin.reverse.bin': 'bin/luna_pinyin.reverse.bin',
+        let engine = await createRimeEngine({
+          wasmDir: '',
+          dictVersion: 'scenario-v2',
         });
-        const hasCache2 = await engine.hasCache();
-        log('  hasCache after loadCompiled = ' + hasCache2);
-        if (!hasCache2) {
-          throw new Error('Expected hasCache to be true after loadCompiled');
-        }
+
+        let ver = engine.getDictVersion();
+        log('  dictVersion = ' + ver);
+        if (ver !== 'scenario-v2') throw new Error('版本不匹配: ' + ver);
+
+        let state = await engine.processInput('nihao');
+        if (!state.candidates || state.candidates.length === 0) throw new Error('无候选词');
+        log('  candidates ok \u2192 PASS');
         engine.destroy();
-        log('  PASS');
       } catch (e) {
         allPassed = false;
         log('  FAIL: ' + e.message);
       }
 
-      // ---- Test 3: loadCache restores engine from cache (same session) ----
+      // ---- Test 3: 相同 dictVersion，不传 data，从缓存加载 ----
       try {
-        log('Test 3: loadCache from newly persisted cache...');
+        log('Test 3: 从缓存加载 (same dictVersion, no data)...');
 
-        let engine = await createRimeEngine({ wasmDir: '' });
-        const hasCache3 = await engine.hasCache();
-        log('  hasCache = ' + hasCache3);
-        if (!hasCache3) {
-          log('  SKIP: no cache found (may be sandboxed browser)');
-          engine.destroy();
-        } else {
-          await engine.loadCache();
-          const state = engine.processInput('nihao');
-          if (!state.candidates || state.candidates.length === 0) {
-            throw new Error('No candidates after loadCache');
-          }
-          engine.destroy();
-          log('  PASS: candidates present after loadCache');
-        }
+        let engine = await createRimeEngine({
+          wasmDir: '',
+          dictVersion: 'scenario-v2',
+        });
+
+        let ver = engine.getDictVersion();
+        log('  dictVersion = ' + ver);
+        if (ver !== 'scenario-v2') throw new Error('版本不匹配: ' + ver);
+
+        let state = await engine.processInput('nihao');
+        if (!state.candidates || state.candidates.length === 0) throw new Error('无候选词');
+        log('  candidates ok \u2192 PASS');
+        engine.destroy();
       } catch (e) {
         allPassed = false;
         log('  FAIL: ' + e.message);
       }
 
-      // ---- Test 4: processInput works after loadCache ----
+      // ---- Test 4: 不同 dictVersion，应重新加载（不依赖缓存） ----
       try {
-        log('Test 4: full input cycle after cache...');
+        log('Test 4: 不同 dictVersion（应命中缓存，版本变了还是重新加载...）');
 
-        let engine = await createRimeEngine({ wasmDir: '' });
-        const hasCache4 = await engine.hasCache();
-        if (hasCache4) {
-          await engine.loadCache();
-          let state = engine.processInput('shi');
-          const hasCandidates = state.candidates && state.candidates.length > 0;
-          log('  processInput after loadCache \u2192 candidates: ' + (hasCandidates ? 'PASS' : 'FAIL'));
+        // 新 version 且传 data，应覆盖缓存
+        let engine = await createRimeEngine({
+          wasmDir: '',
+          dictVersion: 'scenario-v3',
+        });
 
-          if (hasCandidates) {
-            state = engine.pickCandidate(0);
-            log('  pickCandidate \u2192 committed: ' + (state.committed || '(none)'));
-          }
-        } else {
-          log('  SKIP: no cache (cannot test)');
-        }
+        let ver = engine.getDictVersion();
+        log('  dictVersion after scenario-v3 init = ' + ver);
+        if (ver !== 'scenario-v3') throw new Error('版本不匹配: ' + ver);
+
+        let state = await engine.processInput('nihao');
+        if (!state.candidates || state.candidates.length === 0) throw new Error('无候选词');
+        log('  candidates ok \u2192 PASS');
         engine.destroy();
+      } catch (e) {
+        allPassed = false;
+        log('  FAIL: ' + e.message);
+      }
+
+      // ---- Test 5: 多次 destroy + create 验证引擎可复用 ----
+      try {
+        log('Test 5: 多次 destroy/create 循环...');
+
+        for (let i = 0; i < 3; i++) {
+          let engine = await createRimeEngine({
+            wasmDir: '',
+            dictVersion: 'scenario-v3',
+          });
+
+          let state = await engine.processInput('shi');
+          if (!state.candidates || state.candidates.length === 0) throw new Error('第 ' + (i+1) + ' 次无候选词');
+          engine.destroy();
+        }
+        log('  3 次循环均正常 \u2192 PASS');
       } catch (e) {
         allPassed = false;
         log('  FAIL: ' + e.message);

@@ -60,24 +60,21 @@ npx tsdown
 import { createRimeEngine } from 'rime-wasm';
 
 const engine = await createRimeEngine({
-  // Path prefix where rime-api.js, rime-api.wasm, rime-api.data,
-  // and *.bin files are served from.
+  // Path prefix where rime-api.js, rime-api.wasm, and source files are served from.
   wasmDir: '/assets',
 });
 
-// Get version
-console.log(engine.getVersion()); // "1.16.1"
-
 // Process pinyin input
-const state = engine.processInput('nihao');
+const state = await engine.processInput('nihao');
 console.log(state.candidates); // [{ text: "你好", comment: "" }, ...]
 console.log(state.preeditBody); // "ni hao"
 
 // Select a candidate (0-based index)
-const committed = engine.pickCandidate(0);
+const committed = await engine.pickCandidate(0);
 console.log(committed.committed); // "你好"
 
 // Page navigation
+await engine.flipPage(true);
 engine.processInput('shi');
 engine.flipPage(true);  // next page
 engine.flipPage(false); // previous page

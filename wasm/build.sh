@@ -30,6 +30,8 @@ EXPORTED_FUNCTIONS=(
   _rime_wasm_clear_input
   _rime_wasm_set_option
   _rime_wasm_get_version
+  _rime_wasm_sync_data
+  _rime_wasm_create_session
   _rime_wasm_destroy
   _rime_wasm_precompile
   _rime_wasm_read_file
